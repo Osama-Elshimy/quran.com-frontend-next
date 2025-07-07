@@ -108,7 +108,7 @@ export interface LanguageDetectionResult {
 // Add constants for header names and default values
 const HEADERS = {
   ACCEPT_LANGUAGE: 'accept-language',
-  CLOUDFLARE_COUNTRY: 'CF-IPCountry',
+  CLOUDFLARE_COUNTRY: 'cf-ipcountry', // Node.js converts headers to lowercase
   COOKIE: 'cookie',
 } as const;
 

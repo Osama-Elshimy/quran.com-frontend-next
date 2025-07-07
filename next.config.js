@@ -99,6 +99,10 @@ const nextConfig = {
       webpackConfig.externals.push('newrelic');
     }
 
+    if (isServer) {
+      webpackConfig.externals.push('msw/node');
+    }
+
     return webpackConfig;
   },
   headers: async () => {

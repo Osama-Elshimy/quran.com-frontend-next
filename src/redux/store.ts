@@ -113,6 +113,8 @@ const getStore = (
   locale: string,
   countryPreference?: CountryLanguagePreferenceResponse,
   preloadedState?: RootState,
+  detectedLanguage?: string,
+  detectedCountry?: string,
 ) =>
   configureStore({
     reducer: persistedReducer,
@@ -127,7 +129,9 @@ const getStore = (
       }).concat(DefaultSettingsMiddleware),
     devTools: process.env.NEXT_PUBLIC_VERCEL_ENV !== 'production', // disables the devtools in production
     // @ts-ignore
-    preloadedState: preloadedState || getStoreInitialState(locale, countryPreference),
+    preloadedState:
+      preloadedState ||
+      getStoreInitialState(locale, countryPreference, detectedLanguage, detectedCountry),
   });
 
 export type AppStore = ReturnType<typeof getStore>;

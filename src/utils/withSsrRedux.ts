@@ -28,6 +28,9 @@ const withSsrRedux =
     const store = getStore(
       languageResult.detectedLanguage,
       languageResult.countryLanguagePreference,
+      undefined,
+      languageResult.detectedLanguage,
+      languageResult.detectedCountry,
     );
 
     const result = getSsrProps

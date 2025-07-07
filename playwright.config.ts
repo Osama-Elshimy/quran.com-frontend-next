@@ -29,9 +29,22 @@ const config: PlaywrightTestConfig = {
     /* Maximum time each action such as `click()` can take. Defaults to 0 (no limit). */
     actionTimeout: 0,
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: process.env.PLAYWRIGHT_TEST_BASE_URL || 'http://localhost:3000',
+    baseURL: process.env.PLAYWRIGHT_TEST_BASE_URL || 'http://localhost:3005',
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
+  },
+
+  /* Configure the test web server */
+  webServer: {
+    command: 'yarn dev',
+    port: 3005,
+    timeout: 120 * 1000,
+    reuseExistingServer: !process.env.CI,
+    env: {
+      NODE_ENV: 'development',
+      PORT: '3005',
+      MSW_ENABLED: 'true', // Enable MSW for tests
+    },
   },
 
   /* Configure projects for major browsers */

@@ -25,11 +25,15 @@ import ReflectionLanguage from 'types/QuranReflect/ReflectionLanguage';
  *
  * @param {string} locale
  * @param {CountryLanguagePreferenceResponse} [countryPreference] optional country/language preference coming from the server. When provided, we will override the locale defaults according to the product requirements.
+ * @param {string} [detectedLanguage] the detected language from server-side detection
+ * @param {string} [detectedCountry] the detected country from server-side detection
  * @returns {RootState}
  */
 export const getStoreInitialState = (
   locale: string,
   countryPreference?: CountryLanguagePreferenceResponse,
+  detectedLanguage?: string,
+  detectedCountry?: string,
 ): RootState => {
   // the original locale-based defaults
   const baseState: RootState = {
@@ -42,8 +46,8 @@ export const getStoreInitialState = (
     [SliceName.AUDIO_PLAYER_STATE]: getAudioPlayerStateInitialState(locale as Language),
     [SliceName.DEFAULT_SETTINGS]: {
       isUsingDefaultSettings: true,
-      detectedCountry: '',
-      detectedLanguage: '',
+      detectedCountry: detectedCountry || '',
+      detectedLanguage: detectedLanguage || '',
       userHasCustomised: false,
       ayahReflectionsLanguages: [ReflectionLanguage.ENGLISH], // Default to English only
     },
