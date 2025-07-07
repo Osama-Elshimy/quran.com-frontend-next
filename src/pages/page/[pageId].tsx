@@ -27,7 +27,7 @@ import { PAGES_MUSHAF_MAP } from '@/utils/page';
 import getPageVersesParams from '@/utils/pages/getPageVersesParams';
 import getQuranReaderData from '@/utils/pages/getQuranReaderData';
 import { getPageOrJuzMetaDescription } from '@/utils/seo';
-import { isValidPageId } from '@/utils/validator';
+import { isValidPageNumber } from '@/utils/validator';
 import withSsrRedux from '@/utils/withSsrRedux';
 import ChaptersData from 'types/ChaptersData';
 
@@ -98,7 +98,7 @@ export const getServerSideProps: GetServerSideProps = withSsrRedux(
     const { params, locale } = context;
     const pageId = String(params.pageId);
     const chaptersData = await getAllChaptersData(locale);
-    if (!isValidPageId(chaptersData, pageId)) {
+    if (!isValidPageNumber(chaptersData, pageId)) {
       return {
         notFound: true,
       };
