@@ -6,6 +6,7 @@
 import { test, expect, BrowserContext, Page } from '@playwright/test';
 
 // Import the Homepage POM for reusable functionality
+import { mockCountryLanguagePreferences } from '../../mocks/data';
 import Homepage from '../../POM/home-page';
 
 // Add TypeScript declaration for window.__store
@@ -92,6 +93,20 @@ class LocalizationTestHelper {
     this.homepage = new Homepage(page, context);
   }
 
+  public getHeaders(): Record<string, string> {
+    return this.headers;
+  }
+
+  /**
+   * Mocks the country via the CF-IPCountry header and sets up the API mock accordingly.
+   * This is designed to be used with a context that already has the locale set.
+   */
+  async mockCountryAndApiForContext(countryCode: string, language: string) {
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    await this.page.setExtraHTTPHeaders({ 'CF-IPCountry': countryCode.toUpperCase() });
+    await this.setupApiMocking(language, countryCode);
+  }
+
   /**
    * Simulate geolocation by overriding the browser's navigator.geolocation
    */
@@ -155,23 +170,23 @@ class LocalizationTestHelper {
    * Set up API route mocking for country language preference
    */
   private async setupApiMocking(userDeviceLanguage: string, country: string) {
+    const urlPattern = '**/api/proxy/content/api/qdc/resources/country_language_preference*';
+    await this.page.unroute(urlPattern);
+
     const mockData = LocalizationTestHelper.getMockCountryLanguagePreference(
       userDeviceLanguage,
       country,
     );
 
     // Mock the country language preference API for SSR
-    await this.page.route(
-      '**/api/proxy/content/api/qdc/resources/country_language_preference*',
-      async (route) => {
-        console.log('🔍 Playwright: Intercepted country_language_preference API call');
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify(mockData),
-        });
-      },
-    );
+    await this.page.route(urlPattern, async (route) => {
+      console.log('🔍 Playwright: Intercepted country_language_preference API call');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockData),
+      });
+    });
   }
 
   /**
@@ -189,62 +204,12 @@ class LocalizationTestHelper {
     const effectiveCountry = isEnglish ? country : 'US';
 
     // Mock data based on language and country combinations
-    const mockDataMap: Record<string, any> = {
-      EN_US: {
-        country: 'US',
-        userDeviceLanguage: 'en',
-        defaultMushaf: { id: 1 },
-        defaultTranslations: [{ id: 131 }],
-        defaultTafsir: { id: 'en-tafisr-ibn-kathir' },
-        defaultWbwLanguage: { isoCode: 'en' },
-        ayahReflectionsLanguages: [{ isoCode: 'en' }, { isoCode: 'ar' }, { isoCode: 'ur' }],
-      },
-      EN_GB: {
-        country: 'GB',
-        userDeviceLanguage: 'en',
-        defaultMushaf: { id: 1 },
-        defaultTranslations: [{ id: 20 }],
-        defaultTafsir: { id: 'en-tafisr-ibn-kathir' },
-        defaultWbwLanguage: { isoCode: 'en' },
-        ayahReflectionsLanguages: [{ isoCode: 'en' }, { isoCode: 'ar' }, { isoCode: 'ur' }],
-      },
-      EN_CA: {
-        country: 'CA',
-        userDeviceLanguage: 'en',
-        defaultMushaf: { id: 1 },
-        defaultTranslations: [{ id: 20 }],
-        defaultTafsir: { id: 'en-tafisr-ibn-kathir' },
-        defaultWbwLanguage: { isoCode: 'en' },
-        ayahReflectionsLanguages: [{ isoCode: 'en' }, { isoCode: 'ar' }, { isoCode: 'ur' }],
-      },
-      EN_AU: {
-        country: 'AU',
-        userDeviceLanguage: 'en',
-        defaultMushaf: { id: 1 },
-        defaultTranslations: [{ id: 131 }],
-        defaultTafsir: { id: 'en-tafisr-ibn-kathir' },
-        defaultWbwLanguage: { isoCode: 'en' },
-        ayahReflectionsLanguages: [{ isoCode: 'en' }, { isoCode: 'ar' }, { isoCode: 'ur' }],
-      },
-      EN_IN: {
-        country: 'IN',
-        userDeviceLanguage: 'en',
-        defaultMushaf: { id: 1 },
-        defaultTranslations: [{ id: 159 }],
-        defaultTafsir: { id: 'en-tafisr-ibn-kathir' },
-        defaultWbwLanguage: { isoCode: 'en' },
-        ayahReflectionsLanguages: [{ isoCode: 'en' }, { isoCode: 'ar' }, { isoCode: 'ur' }],
-      },
-      AR_US: {
-        country: 'US',
-        userDeviceLanguage: 'ar',
-        defaultMushaf: { id: 2 },
-        defaultTranslations: [{ id: 20 }],
-        defaultTafsir: { id: 'ar-tafseer-al-tabari' },
-        defaultWbwLanguage: { isoCode: 'ar' },
-        ayahReflectionsLanguages: [{ isoCode: 'ar' }, { isoCode: 'en' }],
-      },
-    };
+    const mockDataMap: Record<string, any> = {};
+    for (const [key, value] of Object.entries(mockCountryLanguagePreferences)) {
+      const [lang, countryCode] = key.split('-');
+      const newKey = `${lang.toUpperCase()}_${countryCode.toUpperCase()}`;
+      mockDataMap[newKey] = value;
+    }
 
     const key = `${userDeviceLanguage.toUpperCase()}_${effectiveCountry.toUpperCase()}`;
     const mockData = mockDataMap[key];
@@ -469,24 +434,34 @@ test.describe('Category 1: First-time Guest User Detection & Settings', () => {
   });
 
   test('Test Case 1.2.1: Arabic Device Language + Any Country (Country Ignored)', async ({
-    page,
+    browser,
   }) => {
-    await helper.setBrowserLanguage(['ar-SA', 'ar']);
-
     const testCountries = ['EG', 'SA', 'GB'];
+    const languageCode = 'ar';
+    const locale = 'ar-SA';
+
     for (const testCountry of testCountries) {
-      await helper.mockCountryDetection(testCountry);
+      const context = await browser.newContext({
+        locale,
+      });
+      const page = await context.newPage();
+      const loopHelper = new LocalizationTestHelper(page, context);
+
+      await loopHelper.mockCountryAndApiForContext(testCountry, languageCode);
+
       await page.goto('/');
-      await helper.waitForReduxHydration();
+      await loopHelper.waitForReduxHydration();
 
       // Verify Arabic is detected regardless of country
-      const defaultSettings = await helper.getReduxState();
-      expect(defaultSettings.detectedLanguage).toBe('ar');
+      const defaultSettings = await loopHelper.getReduxState();
+      expect(defaultSettings.detectedLanguage).toBe(languageCode);
       expect(defaultSettings.detectedCountry).toBe('US'); // Should always be US for non-English
+
+      await context.close();
     }
   });
 
-  test('Test Case 1.2.2: All Supported Non-English Languages', async ({ page }) => {
+  test('Test Case 1.2.2: All Supported Non-English Languages', async ({ browser }) => {
     const supportedLanguagesData = [
       { code: SUPPORTED_LANGUAGES.BENGALI, locale: 'bn-BD', name: 'Bengali', translationId: 161 },
       { code: SUPPORTED_LANGUAGES.PERSIAN, locale: 'fa-IR', name: 'Persian', translationId: 135 },
@@ -515,15 +490,19 @@ test.describe('Category 1: First-time Guest User Detection & Settings', () => {
     ];
 
     for (const language of supportedLanguagesData) {
-      await helper.clearAllBrowserData();
-      await helper.setBrowserLanguage([language.locale, language.code]);
-      await helper.mockCountryDetection('US');
+      const context = await browser.newContext({
+        locale: language.locale,
+      });
+      const page = await context.newPage();
+      const loopHelper = new LocalizationTestHelper(page, context);
+
+      await loopHelper.mockCountryAndApiForContext('US', language.code);
 
       await page.goto('/');
-      await helper.waitForReduxHydration();
+      await loopHelper.waitForReduxHydration();
 
       // Verify language is detected and country is ignored (defaults to US)
-      await helper.verifyDefaultSettingsStructure({
+      await loopHelper.verifyDefaultSettingsStructure({
         detectedLanguage: language.code,
         detectedCountry: 'US',
         userHasCustomised: false,
@@ -531,9 +510,10 @@ test.describe('Category 1: First-time Guest User Detection & Settings', () => {
       });
 
       // Verify language-specific settings are applied
-      await helper.verifyCoreSettingsAreApplied();
-      const translations = await helper.homepage.getPersistedValue('translations');
+      await loopHelper.verifyCoreSettingsAreApplied();
+      const translations = await loopHelper.homepage.getPersistedValue('translations');
       expect(translations.selectedTranslations).toContain(language.translationId);
+      await context.close();
     }
   });
 
@@ -584,30 +564,105 @@ test.describe('Category 1: First-time Guest User Detection & Settings', () => {
     });
   });
 
-  test('Test Case 1.3.2: Multiple Unsupported Languages Fallback', async ({ page }) => {
-    const unsupportedLanguagesData = [
-      { locale: 'ko-KR', language: UNSUPPORTED_LANGUAGES.KOREAN, country: 'KR' },
-      { locale: 'de-DE', language: UNSUPPORTED_LANGUAGES.GERMAN, country: TEST_COUNTRIES.DE },
-      { locale: 'es-ES', language: UNSUPPORTED_LANGUAGES.SPANISH, country: 'ES' },
-      { locale: 'he-IL', language: UNSUPPORTED_LANGUAGES.HEBREW, country: 'IL' },
-      { locale: 'hi-IN', language: UNSUPPORTED_LANGUAGES.HINDI, country: TEST_COUNTRIES.IN },
-    ];
+  test('Test Case 1.3.2a: Korean Language Fallback', async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const testHelper = new LocalizationTestHelper(page, context);
 
-    for (const lang of unsupportedLanguagesData) {
-      await helper.clearAllBrowserData();
-      await helper.setBrowserLanguage([lang.locale, lang.language]);
-      await helper.mockCountryDetection(lang.country);
+    await testHelper.setLanguageAndCountry(['ko-KR', UNSUPPORTED_LANGUAGES.KOREAN], 'KR');
 
-      await page.goto('/');
-      await helper.waitForReduxHydration();
+    await page.goto('/');
+    await testHelper.waitForReduxHydration();
 
-      await helper.verifyDefaultSettingsStructure({
-        detectedLanguage: 'en',
-        detectedCountry: lang.country,
-        userHasCustomised: false,
-        isUsingDefaultSettings: true,
-      });
-    }
+    await testHelper.verifyDefaultSettingsStructure({
+      detectedLanguage: 'en',
+      detectedCountry: 'KR',
+      userHasCustomised: false,
+      isUsingDefaultSettings: true,
+    });
+    await context.close();
+  });
+
+  test('Test Case 1.3.2b: German Language Fallback', async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const testHelper = new LocalizationTestHelper(page, context);
+
+    await testHelper.setLanguageAndCountry(
+      ['de-DE', UNSUPPORTED_LANGUAGES.GERMAN],
+      TEST_COUNTRIES.DE,
+    );
+
+    await page.goto('/');
+    await testHelper.waitForReduxHydration();
+
+    await testHelper.verifyDefaultSettingsStructure({
+      detectedLanguage: 'en',
+      detectedCountry: TEST_COUNTRIES.DE,
+      userHasCustomised: false,
+      isUsingDefaultSettings: true,
+    });
+    await context.close();
+  });
+
+  test('Test Case 1.3.2c: Spanish Language Fallback', async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const testHelper = new LocalizationTestHelper(page, context);
+
+    await testHelper.setLanguageAndCountry(['es-ES', UNSUPPORTED_LANGUAGES.SPANISH], 'ES');
+
+    await page.goto('/');
+    await testHelper.waitForReduxHydration();
+
+    await testHelper.verifyDefaultSettingsStructure({
+      detectedLanguage: 'en',
+      detectedCountry: 'ES',
+      userHasCustomised: false,
+      isUsingDefaultSettings: true,
+    });
+    await context.close();
+  });
+
+  test('Test Case 1.3.2d: Hebrew Language Fallback', async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const testHelper = new LocalizationTestHelper(page, context);
+
+    await testHelper.setLanguageAndCountry(['he-IL', UNSUPPORTED_LANGUAGES.HEBREW], 'IL');
+
+    await page.goto('/');
+    await testHelper.waitForReduxHydration();
+
+    await testHelper.verifyDefaultSettingsStructure({
+      detectedLanguage: 'en',
+      detectedCountry: 'IL',
+      userHasCustomised: false,
+      isUsingDefaultSettings: true,
+    });
+    await context.close();
+  });
+
+  test('Test Case 1.3.2e: Hindi Language Fallback', async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const testHelper = new LocalizationTestHelper(page, context);
+
+    await testHelper.setLanguageAndCountry(
+      ['hi-IN', UNSUPPORTED_LANGUAGES.HINDI],
+      TEST_COUNTRIES.IN,
+    );
+
+    await page.goto('/');
+    await testHelper.waitForReduxHydration();
+
+    await testHelper.verifyDefaultSettingsStructure({
+      detectedLanguage: 'en',
+      detectedCountry: TEST_COUNTRIES.IN,
+      userHasCustomised: false,
+      isUsingDefaultSettings: true,
+    });
+    await context.close();
   });
 });
 
