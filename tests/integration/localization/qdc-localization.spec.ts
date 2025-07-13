@@ -80,6 +80,10 @@ const TEST_COUNTRIES = {
   DE: 'DE',
 } as const;
 
+const TIMEOUT_MS = 300000;
+
+const NAVIGATION_OPTIONS = { waitUntil: 'domcontentloaded', timeout: TIMEOUT_MS } as const;
+
 // Helper functions
 class LocalizationTestHelper {
   private page: Page;
@@ -391,46 +395,62 @@ test.describe('Category 1: First-time Guest User Detection & Settings', () => {
   });
 
   test('Test Case 1.1.1: English Device Language + US Country', async ({ page }) => {
-    // MSW will automatically intercept the SSR API call based on headers
-    await helper.setLanguageAndCountry(['en-US', 'en'], 'US');
-
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 300000 });
-
-    await helper.waitForReduxHydration();
-
-    // Verify Redux state shows correct detection
-    await helper.verifyDefaultSettingsStructure({
-      detectedLanguage: 'en',
-      detectedCountry: 'US',
-      userHasCustomised: false,
-      isUsingDefaultSettings: true,
+    await test.step('Set language to English and country to US', async () => {
+      // MSW will automatically intercept the SSR API call based on headers
+      await helper.setLanguageAndCountry(['en-US', 'en'], 'US');
     });
 
-    // Verify all 6 core settings are applied
-    await helper.verifyCoreSettingsAreApplied();
+    await test.step('Navigate to homepage and wait for hydration', async () => {
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
+    });
 
-    // Verify specific US preferences are applied
-    const translations = await helper.homepage.getPersistedValue('translations');
-    expect(translations.selectedTranslations).toContain(131);
-    expect(translations.isUsingDefaultTranslations).toBe(true);
+    await test.step('Verify Redux state shows correct detection', async () => {
+      // The console.log inside this function will appear in the report under this step
+      await helper.verifyDefaultSettingsStructure({
+        detectedLanguage: 'en',
+        detectedCountry: 'US',
+        userHasCustomised: false,
+        isUsingDefaultSettings: true,
+      });
+    });
+
+    await test.step('Verify all 6 core settings are applied', async () => {
+      await helper.verifyCoreSettingsAreApplied();
+    });
+
+    await test.step('Verify specific US preferences are applied', async () => {
+      const translations = await helper.homepage.getPersistedValue('translations');
+      // Adding a console.log here to show how it works within a step
+      console.log('Current translation settings for US:', translations);
+      expect(translations.selectedTranslations).toContain(131);
+      expect(translations.isUsingDefaultTranslations).toBe(true);
+    });
   });
 
   test('Test Case 1.1.2: English Device Language + Non-US Country (UK)', async ({ page }) => {
-    await helper.setLanguageAndCountry(['en-GB', 'en'], 'GB');
-
-    await page.goto('/');
-    await helper.waitForReduxHydration();
-
-    await helper.verifyDefaultSettingsStructure({
-      detectedLanguage: 'en',
-      detectedCountry: 'GB',
-      userHasCustomised: false,
-      isUsingDefaultSettings: true,
+    await test.step('Set language to English and country to UK', async () => {
+      await helper.setLanguageAndCountry(['en-GB', 'en'], 'GB');
     });
 
-    // Verify UK-specific translation is applied
-    const translations = await helper.homepage.getPersistedValue('translations');
-    expect(translations.selectedTranslations).toContain(20);
+    await test.step('Navigate to homepage and wait for hydration', async () => {
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
+    });
+
+    await test.step('Verify Redux state shows correct detection for UK', async () => {
+      await helper.verifyDefaultSettingsStructure({
+        detectedLanguage: 'en',
+        detectedCountry: 'GB',
+        userHasCustomised: false,
+        isUsingDefaultSettings: true,
+      });
+    });
+
+    await test.step('Verify UK-specific translation is applied', async () => {
+      const translations = await helper.homepage.getPersistedValue('translations');
+      expect(translations.selectedTranslations).toContain(20);
+    });
   });
 
   test('Test Case 1.2.1: Arabic Device Language + Any Country (Country Ignored)', async ({
@@ -441,23 +461,25 @@ test.describe('Category 1: First-time Guest User Detection & Settings', () => {
     const locale = 'ar-SA';
 
     for (const testCountry of testCountries) {
-      const context = await browser.newContext({
-        locale,
+      await test.step(`Testing with country: ${testCountry}`, async () => {
+        const context = await browser.newContext({
+          locale,
+        });
+        const page = await context.newPage();
+        const loopHelper = new LocalizationTestHelper(page, context);
+
+        await loopHelper.mockCountryAndApiForContext(testCountry, languageCode);
+
+        await page.goto('/', NAVIGATION_OPTIONS);
+        await loopHelper.waitForReduxHydration();
+
+        // Verify Arabic is detected regardless of country
+        const defaultSettings = await loopHelper.getReduxState();
+        expect(defaultSettings.detectedLanguage).toBe(languageCode);
+        expect(defaultSettings.detectedCountry).toBe('US'); // Should always be US for non-English
+
+        await context.close();
       });
-      const page = await context.newPage();
-      const loopHelper = new LocalizationTestHelper(page, context);
-
-      await loopHelper.mockCountryAndApiForContext(testCountry, languageCode);
-
-      await page.goto('/');
-      await loopHelper.waitForReduxHydration();
-
-      // Verify Arabic is detected regardless of country
-      const defaultSettings = await loopHelper.getReduxState();
-      expect(defaultSettings.detectedLanguage).toBe(languageCode);
-      expect(defaultSettings.detectedCountry).toBe('US'); // Should always be US for non-English
-
-      await context.close();
     }
   });
 
@@ -490,30 +512,32 @@ test.describe('Category 1: First-time Guest User Detection & Settings', () => {
     ];
 
     for (const language of supportedLanguagesData) {
-      const context = await browser.newContext({
-        locale: language.locale,
+      await test.step(`Testing for ${language.name} language`, async () => {
+        const context = await browser.newContext({
+          locale: language.locale,
+        });
+        const page = await context.newPage();
+        const loopHelper = new LocalizationTestHelper(page, context);
+
+        await loopHelper.mockCountryAndApiForContext('US', language.code);
+
+        await page.goto('/', NAVIGATION_OPTIONS);
+        await loopHelper.waitForReduxHydration();
+
+        // Verify language is detected and country is ignored (defaults to US)
+        await loopHelper.verifyDefaultSettingsStructure({
+          detectedLanguage: language.code,
+          detectedCountry: 'US',
+          userHasCustomised: false,
+          isUsingDefaultSettings: true,
+        });
+
+        // Verify language-specific settings are applied
+        await loopHelper.verifyCoreSettingsAreApplied();
+        const translations = await loopHelper.homepage.getPersistedValue('translations');
+        expect(translations.selectedTranslations).toContain(language.translationId);
+        await context.close();
       });
-      const page = await context.newPage();
-      const loopHelper = new LocalizationTestHelper(page, context);
-
-      await loopHelper.mockCountryAndApiForContext('US', language.code);
-
-      await page.goto('/');
-      await loopHelper.waitForReduxHydration();
-
-      // Verify language is detected and country is ignored (defaults to US)
-      await loopHelper.verifyDefaultSettingsStructure({
-        detectedLanguage: language.code,
-        detectedCountry: 'US',
-        userHasCustomised: false,
-        isUsingDefaultSettings: true,
-      });
-
-      // Verify language-specific settings are applied
-      await loopHelper.verifyCoreSettingsAreApplied();
-      const translations = await loopHelper.homepage.getPersistedValue('translations');
-      expect(translations.selectedTranslations).toContain(language.translationId);
-      await context.close();
     }
   });
 
@@ -527,142 +551,192 @@ test.describe('Category 1: First-time Guest User Detection & Settings', () => {
     ];
 
     for (const country of countries) {
-      await helper.clearAllBrowserData();
-      await helper.setBrowserLanguage(['en-US', 'en']);
-      await helper.mockCountryDetection(country.code);
+      await test.step(`Testing with country: ${country.code}`, async () => {
+        const loopHelper = new LocalizationTestHelper(page, page.context());
+        await loopHelper.clearAllBrowserData();
+        await loopHelper.setBrowserLanguage(['en-US', 'en']);
+        await loopHelper.mockCountryDetection(country.code);
 
-      await page.goto('/');
-      await helper.waitForReduxHydration();
+        await page.goto('/', NAVIGATION_OPTIONS);
+        await loopHelper.waitForReduxHydration();
 
-      await helper.verifyDefaultSettingsStructure({
-        detectedLanguage: 'en',
-        detectedCountry: country.code,
-        userHasCustomised: false,
-        isUsingDefaultSettings: true,
+        await loopHelper.verifyDefaultSettingsStructure({
+          detectedLanguage: 'en',
+          detectedCountry: country.code,
+          userHasCustomised: false,
+          isUsingDefaultSettings: true,
+        });
+
+        const translations = await loopHelper.homepage.getPersistedValue('translations');
+        expect(translations.selectedTranslations).toContain(country.translationId);
       });
-
-      const translations = await helper.homepage.getPersistedValue('translations');
-      expect(translations.selectedTranslations).toContain(country.translationId);
     }
   });
 
   test('Test Case 1.3.1: Unsupported Language + Country Fallback (Japanese -> English)', async ({
     page,
   }) => {
-    await helper.setBrowserLanguage(['ja-JP', 'ja']);
-    await helper.mockCountryDetection('JP');
+    await test.step('Set browser language to Japanese and country to JP', async () => {
+      await helper.setBrowserLanguage(['ja-JP', 'ja']);
+      await helper.mockCountryDetection('JP');
+    });
 
-    await page.goto('/');
-    await helper.waitForReduxHydration();
+    await test.step('Navigate to homepage and wait for hydration', async () => {
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
+    });
 
-    // Should fallback to English but preserve country
-    await helper.verifyDefaultSettingsStructure({
-      detectedLanguage: 'en',
-      detectedCountry: 'JP',
-      userHasCustomised: false,
-      isUsingDefaultSettings: true,
+    await test.step('Verify settings fallback to English, preserving country', async () => {
+      // Should fallback to English but preserve country
+      await helper.verifyDefaultSettingsStructure({
+        detectedLanguage: 'en',
+        detectedCountry: 'JP',
+        userHasCustomised: false,
+        isUsingDefaultSettings: true,
+      });
     });
   });
 
   test('Test Case 1.3.2a: Korean Language Fallback', async ({ browser }) => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    const testHelper = new LocalizationTestHelper(page, context);
+    await test.step('Setup context and helper', async () => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const testHelper = new LocalizationTestHelper(page, context);
 
-    await testHelper.setLanguageAndCountry(['ko-KR', UNSUPPORTED_LANGUAGES.KOREAN], 'KR');
+      await test.step('Set language to Korean and country to KR', async () => {
+        await testHelper.setLanguageAndCountry(['ko-KR', UNSUPPORTED_LANGUAGES.KOREAN], 'KR');
+      });
 
-    await page.goto('/');
-    await testHelper.waitForReduxHydration();
+      await test.step('Navigate to homepage and wait for hydration', async () => {
+        await page.goto('/', NAVIGATION_OPTIONS);
+        await testHelper.waitForReduxHydration();
+      });
 
-    await testHelper.verifyDefaultSettingsStructure({
-      detectedLanguage: 'en',
-      detectedCountry: 'KR',
-      userHasCustomised: false,
-      isUsingDefaultSettings: true,
+      await test.step('Verify settings fallback to English, preserving country', async () => {
+        await testHelper.verifyDefaultSettingsStructure({
+          detectedLanguage: 'en',
+          detectedCountry: 'KR',
+          userHasCustomised: false,
+          isUsingDefaultSettings: true,
+        });
+      });
+
+      await context.close();
     });
-    await context.close();
   });
 
   test('Test Case 1.3.2b: German Language Fallback', async ({ browser }) => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    const testHelper = new LocalizationTestHelper(page, context);
+    await test.step('Setup context and helper', async () => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const testHelper = new LocalizationTestHelper(page, context);
 
-    await testHelper.setLanguageAndCountry(
-      ['de-DE', UNSUPPORTED_LANGUAGES.GERMAN],
-      TEST_COUNTRIES.DE,
-    );
+      await test.step('Set language to German and country to DE', async () => {
+        await testHelper.setLanguageAndCountry(
+          ['de-DE', UNSUPPORTED_LANGUAGES.GERMAN],
+          TEST_COUNTRIES.DE,
+        );
+      });
 
-    await page.goto('/');
-    await testHelper.waitForReduxHydration();
+      await test.step('Navigate to homepage and wait for hydration', async () => {
+        await page.goto('/', NAVIGATION_OPTIONS);
+        await testHelper.waitForReduxHydration();
+      });
 
-    await testHelper.verifyDefaultSettingsStructure({
-      detectedLanguage: 'en',
-      detectedCountry: TEST_COUNTRIES.DE,
-      userHasCustomised: false,
-      isUsingDefaultSettings: true,
+      await test.step('Verify settings fallback to English, preserving country', async () => {
+        await testHelper.verifyDefaultSettingsStructure({
+          detectedLanguage: 'en',
+          detectedCountry: TEST_COUNTRIES.DE,
+          userHasCustomised: false,
+          isUsingDefaultSettings: true,
+        });
+      });
+      await context.close();
     });
-    await context.close();
   });
 
   test('Test Case 1.3.2c: Spanish Language Fallback', async ({ browser }) => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    const testHelper = new LocalizationTestHelper(page, context);
+    await test.step('Setup context and page', async () => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const testHelper = new LocalizationTestHelper(page, context);
 
-    await testHelper.setLanguageAndCountry(['es-ES', UNSUPPORTED_LANGUAGES.SPANISH], 'ES');
+      await test.step('Set language to Spanish and country to ES', async () => {
+        await testHelper.setLanguageAndCountry(['es-ES', UNSUPPORTED_LANGUAGES.SPANISH], 'ES');
+      });
 
-    await page.goto('/');
-    await testHelper.waitForReduxHydration();
+      await test.step('Navigate and hydrate', async () => {
+        await page.goto('/', NAVIGATION_OPTIONS);
+        await testHelper.waitForReduxHydration();
+      });
 
-    await testHelper.verifyDefaultSettingsStructure({
-      detectedLanguage: 'en',
-      detectedCountry: 'ES',
-      userHasCustomised: false,
-      isUsingDefaultSettings: true,
+      await test.step('Verify fallback to English', async () => {
+        await testHelper.verifyDefaultSettingsStructure({
+          detectedLanguage: 'en',
+          detectedCountry: 'ES',
+          userHasCustomised: false,
+          isUsingDefaultSettings: true,
+        });
+      });
+      await context.close();
     });
-    await context.close();
   });
 
   test('Test Case 1.3.2d: Hebrew Language Fallback', async ({ browser }) => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    const testHelper = new LocalizationTestHelper(page, context);
+    await test.step('Setup context and page', async () => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const testHelper = new LocalizationTestHelper(page, context);
 
-    await testHelper.setLanguageAndCountry(['he-IL', UNSUPPORTED_LANGUAGES.HEBREW], 'IL');
+      await test.step('Set language to Hebrew and country to IL', async () => {
+        await testHelper.setLanguageAndCountry(['he-IL', UNSUPPORTED_LANGUAGES.HEBREW], 'IL');
+      });
 
-    await page.goto('/');
-    await testHelper.waitForReduxHydration();
+      await test.step('Navigate and hydrate', async () => {
+        await page.goto('/', NAVIGATION_OPTIONS);
+        await testHelper.waitForReduxHydration();
+      });
 
-    await testHelper.verifyDefaultSettingsStructure({
-      detectedLanguage: 'en',
-      detectedCountry: 'IL',
-      userHasCustomised: false,
-      isUsingDefaultSettings: true,
+      await test.step('Verify fallback to English', async () => {
+        await testHelper.verifyDefaultSettingsStructure({
+          detectedLanguage: 'en',
+          detectedCountry: 'IL',
+          userHasCustomised: false,
+          isUsingDefaultSettings: true,
+        });
+      });
+      await context.close();
     });
-    await context.close();
   });
 
   test('Test Case 1.3.2e: Hindi Language Fallback', async ({ browser }) => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    const testHelper = new LocalizationTestHelper(page, context);
+    await test.step('Setup context and page', async () => {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const testHelper = new LocalizationTestHelper(page, context);
 
-    await testHelper.setLanguageAndCountry(
-      ['hi-IN', UNSUPPORTED_LANGUAGES.HINDI],
-      TEST_COUNTRIES.IN,
-    );
+      await test.step('Set language to Hindi and country to IN', async () => {
+        await testHelper.setLanguageAndCountry(
+          ['hi-IN', UNSUPPORTED_LANGUAGES.HINDI],
+          TEST_COUNTRIES.IN,
+        );
+      });
 
-    await page.goto('/');
-    await testHelper.waitForReduxHydration();
+      await test.step('Navigate and hydrate', async () => {
+        await page.goto('/', NAVIGATION_OPTIONS);
+        await testHelper.waitForReduxHydration();
+      });
 
-    await testHelper.verifyDefaultSettingsStructure({
-      detectedLanguage: 'en',
-      detectedCountry: TEST_COUNTRIES.IN,
-      userHasCustomised: false,
-      isUsingDefaultSettings: true,
+      await test.step('Verify fallback to English', async () => {
+        await testHelper.verifyDefaultSettingsStructure({
+          detectedLanguage: 'en',
+          detectedCountry: TEST_COUNTRIES.IN,
+          userHasCustomised: false,
+          isUsingDefaultSettings: true,
+        });
+      });
+      await context.close();
     });
-    await context.close();
   });
 });
 
@@ -676,200 +750,224 @@ test.describe('Category 2: User Authentication & Settings Persistence', () => {
   });
 
   test('Test Case 2.1.1: Guest Settings Preservation on Signup', async ({ page }) => {
-    // Start as guest with detected Arabic settings
-    await helper.setBrowserLanguage(['ar-SA', 'ar']);
-    await helper.mockCountryDetection('US');
+    await test.step('Set initial guest settings to Arabic', async () => {
+      // Start as guest with detected Arabic settings
+      await helper.setBrowserLanguage(['ar-SA', 'ar']);
+      await helper.mockCountryDetection('US');
 
-    await page.goto('/');
-    await helper.waitForReduxHydration();
-
-    // Verify initial guest settings
-    let defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.detectedLanguage).toBe('ar');
-    expect(defaultSettings.userHasCustomised).toBe(false);
-
-    const guestTranslations = await helper.homepage.getPersistedValue('translations');
-    expect(guestTranslations.selectedTranslations).toContain(20);
-
-    // Simulate user signup/registration flow
-    // Navigate to signup page
-    await page.goto('/login');
-    await page.locator('[data-testid="signup-tab"]').click();
-
-    // Fill signup form (mock implementation)
-    await page.fill('[data-testid="email-input"]', 'test@example.com');
-    await page.fill('[data-testid="password-input"]', 'testpassword123');
-
-    // Mock successful signup API response
-    await page.route('**/api/auth/signup', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          user: { id: 'test-user-123', email: 'test@example.com' },
-        }),
-      });
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
     });
 
-    await page.locator('[data-testid="signup-submit"]').click();
-    await page.waitForURL('/');
-    await helper.waitForReduxHydration();
+    await test.step('Verify initial guest settings', async () => {
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.detectedLanguage).toBe('ar');
+      expect(defaultSettings.userHasCustomised).toBe(false);
 
-    // Verify guest settings are preserved after signup
-    defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.detectedLanguage).toBe('ar');
-    expect(defaultSettings.userHasCustomised).toBe(false);
+      const guestTranslations = await helper.homepage.getPersistedValue('translations');
+      expect(guestTranslations.selectedTranslations).toContain(20);
+    });
 
-    const postSignupTranslations = await helper.homepage.getPersistedValue('translations');
-    expect(postSignupTranslations.selectedTranslations).toContain(20);
+    await test.step('Simulate user signup flow', async () => {
+      // Simulate user signup/registration flow
+      // Navigate to signup page
+      await page.goto('/login', NAVIGATION_OPTIONS);
+      await page.locator('button:has-text("Continue with Email")').click();
+      await page.locator('button:has-text("Sign up")').first().click();
+
+      // Fill signup form (mock implementation)
+      await page.locator('input[placeholder="First Name"]').fill('Test');
+      await page.locator('input[placeholder="Last Name"]').fill('User');
+      await page.locator('input[placeholder="Email address"]').fill('test@example.com');
+      await page.locator('input[placeholder="Username"]').fill('testuser');
+      await page.locator('input[placeholder="Password"]').fill('testpassword123');
+      await page.locator('input[placeholder="Confirm password"]').fill('testpassword123');
+
+      // Click the initial sign-up button to trigger the verification code step.
+      await page.locator('button[type="submit"]:has-text("Sign up")').click();
+
+      // Wait for the verification code input to be visible and then fill it.
+      const verificationInput = page.locator('input[aria-label="verification input"]');
+      await expect(verificationInput).toBeVisible();
+      await verificationInput.fill('123456');
+
+      // After filling the code, the app should automatically log in and redirect to the homepage.
+      await page.waitForURL('/');
+      await helper.waitForReduxHydration();
+    });
+
+    await test.step('Verify guest settings are preserved after signup', async () => {
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.detectedLanguage).toBe('ar');
+      expect(defaultSettings.userHasCustomised).toBe(false);
+
+      const postSignupTranslations = await helper.homepage.getPersistedValue('translations');
+      expect(postSignupTranslations.selectedTranslations).toContain(20);
+    });
   });
 
   test('Test Case 2.1.2: Modified Guest Settings on Signup', async ({ page }) => {
-    // Start as guest with initial settings
-    await helper.setBrowserLanguage(['en-US', 'en']);
-    await helper.mockCountryDetection('US');
+    await test.step('Set initial guest settings', async () => {
+      // Start as guest with initial settings
+      await helper.setBrowserLanguage(['en-US', 'en']);
+      await helper.mockCountryDetection('US');
 
-    await page.goto('/');
-    await helper.waitForReduxHydration();
-
-    // Modify settings as guest
-    await helper.homepage.openSettingsDrawer();
-    await expect(page.locator('[data-testid="settings-drawer"]')).toBeVisible();
-
-    // Simulate custom translation selection
-    await page.evaluate(() => {
-      window.__store?.dispatch({
-        type: 'translations/setSelectedTranslations',
-        payload: { translations: [20], locale: 'en' },
-      });
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
     });
 
-    await page.waitForTimeout(1000);
+    await test.step('Modify guest settings', async () => {
+      // Modify settings as guest
+      await helper.homepage.openSettingsDrawer();
+      await expect(page.locator('#theme-section')).toBeVisible();
 
-    // Verify user has customized settings
-    let defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.userHasCustomised).toBe(true);
-
-    await page.keyboard.press('Escape'); // Close settings drawer
-
-    // Proceed with signup
-    await page.goto('/login');
-    await page.locator('[data-testid="signup-tab"]').click();
-    await page.fill('[data-testid="email-input"]', 'customuser@example.com');
-    await page.fill('[data-testid="password-input"]', 'custompass123');
-
-    await page.route('**/api/auth/signup', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          user: { id: 'custom-user-123', email: 'customuser@example.com' },
-        }),
+      // Simulate custom translation selection
+      await page.evaluate(() => {
+        window.__store?.dispatch({
+          type: 'translations/setSelectedTranslations',
+          payload: { translations: [20], locale: 'en' },
+        });
       });
+
+      await page.waitForTimeout(1000);
+
+      // Verify user has customized settings
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.userHasCustomised).toBe(true);
+
+      await page.keyboard.press('Escape'); // Close settings drawer
     });
 
-    await page.locator('[data-testid="signup-submit"]').click();
-    await page.waitForURL('/');
-    await helper.waitForReduxHydration();
+    await test.step('Proceed with signup', async () => {
+      await page.goto('/login', NAVIGATION_OPTIONS);
+      await page.locator('button:has-text("Continue with Email")').click();
+      await page.locator('button:has-text("Sign up")').first().click();
+      await page.locator('input[placeholder="First Name"]').fill('Custom');
+      await page.locator('input[placeholder="Last Name"]').fill('User');
+      await page.locator('input[placeholder="Email address"]').fill('customuser@example.com');
+      await page.locator('input[placeholder="Username"]').fill('customuser');
+      await page.locator('input[placeholder="Password"]').fill('Custompass_123');
+      await page.locator('input[placeholder="Confirm password"]').fill('Custompass_123');
 
-    // Verify customized settings are preserved
-    defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.userHasCustomised).toBe(true);
+      // Click the initial sign-up button to trigger the verification code step.
+      await page.locator('button[type="submit"]:has-text("Sign up")').click();
 
-    const customTranslations = await helper.homepage.getPersistedValue('translations');
-    expect(customTranslations.selectedTranslations).toContain(20);
+      // Wait for the verification code input to be visible and then fill it.
+      const verificationInput = page.locator('input[aria-label="verification input"]');
+      await expect(verificationInput).toBeVisible();
+      await verificationInput.fill('123456');
+
+      // After filling the code, the app should automatically log in and redirect to the homepage.
+      await page.waitForURL('/');
+      await helper.waitForReduxHydration();
+    });
+
+    await test.step('Verify customized settings are preserved', async () => {
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.userHasCustomised).toBe(true);
+
+      const customTranslations = await helper.homepage.getPersistedValue('translations');
+      expect(customTranslations.selectedTranslations).toContain(20);
+    });
   });
 
   test('Test Case 2.2.1: User with Saved Settings Login', async ({ page }) => {
-    // Mock user with existing saved settings
-    const savedUserSettings = {
-      translations: { selectedTranslations: [159], isUsingDefaultTranslations: false },
-      tafsirs: { selectedTafsirs: ['en-tafisr-ibn-kathir'] },
-      readingPreferences: { selectedWordByWordLocale: 'ur' },
-      defaultSettings: {
-        detectedLanguage: 'ur',
-        detectedCountry: 'PK',
-        userHasCustomised: true,
-        isUsingDefaultSettings: false,
-      },
-    };
+    await test.step('Mock user with existing saved settings', async () => {
+      const savedUserSettings = {
+        translations: { selectedTranslations: [159], isUsingDefaultTranslations: false },
+        tafsirs: { selectedTafsirs: ['en-tafisr-ibn-kathir'] },
+        readingPreferences: { selectedWordByWordLocale: 'ur' },
+        defaultSettings: {
+          detectedLanguage: 'ur',
+          detectedCountry: 'PK',
+          userHasCustomised: true,
+          isUsingDefaultSettings: false,
+        },
+      };
 
-    // Mock login API response with saved settings
-    await page.route('**/api/auth/login', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          user: {
-            id: 'existing-user-123',
-            email: 'existing@example.com',
-            settings: savedUserSettings,
-          },
-        }),
+      // Mock login API response with saved settings
+      await page.route('**/api/auth/login', async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            user: {
+              id: 'existing-user-123',
+              email: 'existing@example.com',
+              settings: savedUserSettings,
+            },
+          }),
+        });
       });
     });
 
-    await page.goto('/login');
-    await page.fill('[data-testid="email-input"]', 'existing@example.com');
-    await page.fill('[data-testid="password-input"]', 'existingpass123');
-    await page.locator('[data-testid="login-submit"]').click();
+    await test.step('Login user', async () => {
+      await page.goto('/login', NAVIGATION_OPTIONS);
+      await page.locator('button:has-text("Continue with Email")').click();
+      await page.locator('input[placeholder="Email address"]').fill('existing@example.com');
+      await page.locator('input[placeholder="Password"]').fill('existingpass123');
+      await page.locator('button:has-text("Continue")').click();
 
-    await page.waitForURL('/');
-    await helper.waitForReduxHydration();
+      await page.waitForURL('/');
+      await helper.waitForReduxHydration();
+    });
 
-    // Verify saved settings are loaded
-    const defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.detectedLanguage).toBe('ur');
-    expect(defaultSettings.detectedCountry).toBe('PK');
-    expect(defaultSettings.userHasCustomised).toBe(true);
-    expect(defaultSettings.isUsingDefaultSettings).toBe(false);
+    await test.step('Verify saved settings are loaded', async () => {
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.detectedLanguage).toBe('ur');
+      expect(defaultSettings.detectedCountry).toBe('PK');
+      expect(defaultSettings.userHasCustomised).toBe(true);
+      expect(defaultSettings.isUsingDefaultSettings).toBe(false);
 
-    const translations = await helper.homepage.getPersistedValue('translations');
-    expect(translations.selectedTranslations).toContain(159);
-    expect(translations.isUsingDefaultTranslations).toBe(false);
+      const translations = await helper.homepage.getPersistedValue('translations');
+      expect(translations.selectedTranslations).toContain(159);
+      expect(translations.isUsingDefaultTranslations).toBe(false);
+    });
   });
 
   test('Test Case 2.2.2: User with No Saved Settings Login', async ({ page }) => {
-    // Mock user with no saved settings
-    await page.route('**/api/auth/login', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          user: {
-            id: 'new-user-123',
-            email: 'newuser@example.com',
-            settings: null, // No saved settings
-          },
-        }),
+    await test.step('Mock user with no saved settings', async () => {
+      await page.route('**/api/auth/login', async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            user: {
+              id: 'new-user-123',
+              email: 'newuser@example.com',
+              settings: null, // No saved settings
+            },
+          }),
+        });
       });
     });
 
-    // Mock fresh detection for the new user
-    await helper.setBrowserLanguage(['en-CA', 'en']);
-    await helper.mockCountryDetection('CA');
+    await test.step('Mock fresh detection and login user', async () => {
+      await helper.setBrowserLanguage(['en-CA', 'en']);
+      await helper.mockCountryDetection('CA');
 
-    await page.goto('/login');
-    await page.fill('[data-testid="email-input"]', 'newuser@example.com');
-    await page.fill('[data-testid="password-input"]', 'newpass123');
-    await page.locator('[data-testid="login-submit"]').click();
+      await page.goto('/login', NAVIGATION_OPTIONS);
+      await page.locator('button:has-text("Continue with Email")').click();
+      await page.locator('input[placeholder="Email address"]').fill('newuser@example.com');
+      await page.locator('input[placeholder="Password"]').fill('newpass123');
+      await page.locator('button:has-text("Continue")').click();
 
-    await page.waitForURL('/');
-    await helper.waitForReduxHydration();
+      await page.waitForURL('/');
+      await helper.waitForReduxHydration();
+    });
 
-    // Verify fresh detection runs and appropriate defaults are applied
-    const defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.detectedLanguage).toBe('en');
-    expect(defaultSettings.detectedCountry).toBe('CA');
-    expect(defaultSettings.userHasCustomised).toBe(false);
-    expect(defaultSettings.isUsingDefaultSettings).toBe(true);
+    await test.step('Verify fresh detection and default settings applied', async () => {
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.detectedLanguage).toBe('en');
+      expect(defaultSettings.detectedCountry).toBe('CA');
+      expect(defaultSettings.userHasCustomised).toBe(false);
+      expect(defaultSettings.isUsingDefaultSettings).toBe(true);
 
-    const translations = await helper.homepage.getPersistedValue('translations');
-    expect(translations.selectedTranslations).toContain(20); // Canada-specific default
+      const translations = await helper.homepage.getPersistedValue('translations');
+      expect(translations.selectedTranslations).toContain(20); // Canada-specific default
+    });
   });
 });
 
@@ -885,115 +983,114 @@ test.describe('Category 3: Language Selector Behavior', () => {
   test('Test Case 3.1.1: Language Change with Unmodified Settings (Arabic to English)', async ({
     page,
   }) => {
-    // Start with Arabic detection
-    await helper.setBrowserLanguage(['ar-SA', 'ar']);
-    await helper.mockCountryDetection('US');
+    await test.step('Start with Arabic detection', async () => {
+      await helper.setBrowserLanguage(['ar-SA', 'ar']);
+      await helper.mockCountryDetection('US');
 
-    await page.goto('/');
-    await helper.waitForReduxHydration();
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
+    });
 
-    // Verify initial Arabic settings
-    let defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.detectedLanguage).toBe('ar');
-    expect(defaultSettings.userHasCustomised).toBe(false);
+    await test.step('Verify initial Arabic settings', async () => {
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.detectedLanguage).toBe('ar');
+      expect(defaultSettings.userHasCustomised).toBe(false);
+    });
 
-    // Mock English preferences for language switch
-    // Click language selector and switch to English
-    await page.locator('[aria-label="Select Language"]').click();
-    await expect(page.locator('div[role="menuitem"]:has-text("English")')).toBeVisible();
+    await test.step('Switch language to English', async () => {
+      await page.locator('[aria-label="Select Language"]').click();
+      await expect(page.locator('div[role="menuitem"]:has-text("English")')).toBeVisible();
 
-    await Promise.all([page.waitForURL('/'), page.locator('text=English').click()]);
+      await Promise.all([page.waitForURL('/'), page.locator('text=English').click()]);
 
-    await helper.waitForReduxHydration();
+      await helper.waitForReduxHydration();
+    });
 
-    // Verify settings changed to English defaults
-    defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.detectedLanguage).toBe('en');
-    expect(defaultSettings.userHasCustomised).toBe(false); // Should remain false
+    await test.step('Verify settings changed to English defaults', async () => {
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.detectedLanguage).toBe('en');
+      expect(defaultSettings.userHasCustomised).toBe(false); // Should remain false
 
-    const translations = await helper.homepage.getPersistedValue('translations');
-    expect(translations.selectedTranslations).toContain(131); // English default
+      const translations = await helper.homepage.getPersistedValue('translations');
+      expect(translations.selectedTranslations).toContain(131); // English default
+    });
   });
 
   test('Test Case 3.1.2: Switch to Supported Non-English Language', async ({ page }) => {
-    // Start with English detection
-    await helper.setBrowserLanguage(['en-US', 'en']);
-    await helper.mockCountryDetection('US');
+    await test.step('Start with English detection', async () => {
+      await helper.setBrowserLanguage(['en-US', 'en']);
+      await helper.mockCountryDetection('US');
 
-    await page.goto('/');
-    await helper.waitForReduxHydration();
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
+    });
 
-    // Verify initial English settings
-    let defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.detectedLanguage).toBe('en');
-    expect(defaultSettings.userHasCustomised).toBe(false);
+    await test.step('Verify initial English settings', async () => {
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.detectedLanguage).toBe('en');
+      expect(defaultSettings.userHasCustomised).toBe(false);
+    });
 
-    // Mock Arabic preferences for language switch
-    // Click language selector and switch to Arabic
-    await page.locator('[aria-label="Select Language"]').click();
-    await expect(page.locator('div[role="menuitem"]:has-text("العربية")')).toBeVisible();
+    await test.step('Switch language to Arabic', async () => {
+      await page.locator('[aria-label="Select Language"]').click();
+      await expect(page.locator('div[role="menuitem"]:has-text("العربية")')).toBeVisible();
 
-    await Promise.all([page.waitForURL('/ar'), page.locator('text=العربية').click()]);
+      await Promise.all([page.waitForURL('/ar'), page.locator('text=العربية').click()]);
 
-    await helper.waitForReduxHydration();
+      await helper.waitForReduxHydration();
+    });
 
-    // Verify settings changed to Arabic defaults
-    defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.detectedLanguage).toBe('ar');
-    expect(defaultSettings.detectedCountry).toBe('US'); // Country ignored for non-English
-    expect(defaultSettings.userHasCustomised).toBe(false); // Should remain false
+    await test.step('Verify settings changed to Arabic defaults', async () => {
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.detectedLanguage).toBe('ar');
+      expect(defaultSettings.detectedCountry).toBe('US'); // Country ignored for non-English
+      expect(defaultSettings.userHasCustomised).toBe(false); // Should remain false
 
-    const translations = await helper.homepage.getPersistedValue('translations');
-    expect(translations.selectedTranslations).toContain(20); // Arabic default
+      const translations = await helper.homepage.getPersistedValue('translations');
+      expect(translations.selectedTranslations).toContain(20); // Arabic default
+    });
   });
 
   test('Test Case 3.2.1: Language Change Preserves User Customizations', async ({ page }) => {
-    // Start with English detection
-    await helper.setBrowserLanguage(['en-US', 'en']);
-    await helper.mockCountryDetection('US');
+    await test.step('Start with English detection', async () => {
+      await helper.setBrowserLanguage(['en-US', 'en']);
+      await helper.mockCountryDetection('US');
 
-    await page.goto('/');
-    await helper.waitForReduxHydration();
-
-    // Open settings and make customizations
-    await helper.homepage.openSettingsDrawer();
-
-    // Wait for settings drawer to be visible
-    await expect(page.locator('[data-testid="settings-drawer"]')).toBeVisible();
-
-    // Customize translation (simulate clicking on a different translation)
-    // This is a placeholder - you'd need to implement actual translation selection logic
-    await page.evaluate(() => {
-      // Simulate Redux dispatch to change translation
-      window.__store?.dispatch({
-        type: 'translations/setSelectedTranslations',
-        payload: { translations: [20], locale: 'en' },
-      });
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
     });
 
-    await page.waitForTimeout(1000); // Allow state to update
+    await test.step('Customize settings', async () => {
+      await helper.homepage.openSettingsDrawer();
+      await expect(page.locator('#theme-section')).toBeVisible();
 
-    // Verify user has customized
-    let defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.userHasCustomised).toBe(true);
+      await page.evaluate(() => {
+        window.__store?.dispatch({
+          type: 'translations/setSelectedTranslations',
+          payload: { translations: [20], locale: 'en' },
+        });
+      });
 
-    // Close settings drawer
-    await page.keyboard.press('Escape');
+      await page.waitForTimeout(1000); // Allow state to update
 
-    // Mock Arabic preferences for language switch
-    // Switch to Arabic
-    await page.locator('[aria-label="Select Language"]').click();
-    await Promise.all([page.waitForURL('/ar'), page.locator('text=العربية').click()]);
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.userHasCustomised).toBe(true);
 
-    await helper.waitForReduxHydration();
+      await page.keyboard.press('Escape');
+    });
 
-    // Verify userHasCustomised is preserved
-    defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.userHasCustomised).toBe(true);
+    await test.step('Switch to Arabic and verify customization preservation', async () => {
+      await page.locator('[aria-label="Select Language"]').click();
+      await Promise.all([page.waitForURL('/ar'), page.locator('text=العربية').click()]);
 
-    // Verify custom translation is preserved (translation 20 should still be selected)
-    const translations = await helper.homepage.getPersistedValue('translations');
-    expect(translations.selectedTranslations).toContain(20);
+      await helper.waitForReduxHydration();
+
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.userHasCustomised).toBe(true);
+
+      const translations = await helper.homepage.getPersistedValue('translations');
+      expect(translations.selectedTranslations).toContain(20);
+    });
   });
 });
 
@@ -1007,119 +1104,120 @@ test.describe('Category 4: Reset Settings Functionality', () => {
   });
 
   test('Test Case 4.1: Settings Reset for Guest Users', async ({ page }) => {
-    await helper.setBrowserLanguage(['en-US', 'en']);
-    await helper.mockCountryDetection('US');
+    await test.step('Set initial settings and navigate to page', async () => {
+      await helper.setBrowserLanguage(['en-US', 'en']);
+      await helper.mockCountryDetection('US');
 
-    await page.goto('/');
-    await helper.waitForReduxHydration();
-
-    // Modify settings manually
-    await helper.homepage.openSettingsDrawer();
-    await expect(page.locator('[data-testid="settings-drawer"]')).toBeVisible();
-
-    // Simulate settings modification
-    await page.evaluate(() => {
-      window.__store?.dispatch({
-        type: 'translations/setSelectedTranslations',
-        payload: { translations: [20], locale: 'en' },
-      });
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
     });
 
-    await page.waitForTimeout(1000);
+    await test.step('Modify settings and verify customization', async () => {
+      await helper.homepage.openSettingsDrawer();
+      await expect(page.locator('#theme-section')).toBeVisible();
 
-    // Verify user has customized
-    let defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.userHasCustomised).toBe(true);
+      await page.evaluate(() => {
+        window.__store?.dispatch({
+          type: 'translations/setSelectedTranslations',
+          payload: { translations: [20], locale: 'en' },
+        });
+      });
 
-    // Click Reset to defaults button
-    await page.locator('text=Reset to defaults').click();
-    await page.waitForTimeout(2000); // Allow reset to complete
+      await page.waitForTimeout(1000);
 
-    // Verify fresh detection and reset
-    defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.userHasCustomised).toBe(false);
-    expect(defaultSettings.isUsingDefaultSettings).toBe(true);
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.userHasCustomised).toBe(true);
+    });
 
-    // Verify settings are back to defaults
-    const translations = await helper.homepage.getPersistedValue('translations');
-    expect(translations.selectedTranslations).toContain(131); // Back to default
+    await test.step('Reset settings to defaults', async () => {
+      await page.locator('text=Reset to defaults').click();
+      await page.waitForTimeout(2000); // Allow reset to complete
+    });
+
+    await test.step('Verify settings are reset', async () => {
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.userHasCustomised).toBe(false);
+      expect(defaultSettings.isUsingDefaultSettings).toBe(true);
+
+      const translations = await helper.homepage.getPersistedValue('translations');
+      expect(translations.selectedTranslations).toContain(131); // Back to default
+    });
   });
 
   test('Test Case 4.2: Settings Reset for Logged-in Users', async ({ page }) => {
-    // Mock user login with custom settings
-    const savedUserSettings = {
-      translations: { selectedTranslations: [20], isUsingDefaultTranslations: false },
-      tafsirs: { selectedTafsirs: ['ar-tafseer-al-tabari'] },
-      readingPreferences: { selectedWordByWordLocale: 'ar' },
-      defaultSettings: {
-        detectedLanguage: 'ar',
-        detectedCountry: 'US',
-        userHasCustomised: true,
-        isUsingDefaultSettings: false,
-      },
-    };
+    await test.step('Mock user login with custom settings', async () => {
+      const savedUserSettings = {
+        translations: { selectedTranslations: [20], isUsingDefaultTranslations: false },
+        tafsirs: { selectedTafsirs: ['ar-tafseer-al-tabari'] },
+        readingPreferences: { selectedWordByWordLocale: 'ar' },
+        defaultSettings: {
+          detectedLanguage: 'ar',
+          detectedCountry: 'US',
+          userHasCustomised: true,
+          isUsingDefaultSettings: false,
+        },
+      };
 
-    await page.route('**/api/auth/login', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          user: {
-            id: 'logged-user-123',
-            email: 'logged@example.com',
-            settings: savedUserSettings,
-          },
-        }),
-      });
-    });
-
-    // Mock fresh detection preferences for reset
-    await helper.setBrowserLanguage(['en-US', 'en']);
-    await helper.mockCountryDetection('US');
-
-    // Mock settings update API for reset
-    await page.route('**/api/user/settings', async (route) => {
-      if (route.request().method() === 'PUT') {
+      await page.route('**/api/auth/login', async (route) => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ success: true }),
+          body: JSON.stringify({
+            success: true,
+            user: {
+              id: 'logged-user-123',
+              email: 'logged@example.com',
+              settings: savedUserSettings,
+            },
+          }),
         });
-      }
+      });
+
+      await helper.setBrowserLanguage(['en-US', 'en']);
+      await helper.mockCountryDetection('US');
+
+      await page.route('**/api/user/settings', async (route) => {
+        if (route.request().method() === 'PUT') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ success: true }),
+          });
+        }
+      });
     });
 
-    // Login user
-    await page.goto('/login');
-    await page.fill('[data-testid="email-input"]', 'logged@example.com');
-    await page.fill('[data-testid="password-input"]', 'loggedpass123');
-    await page.locator('[data-testid="login-submit"]').click();
+    await test.step('Login user and verify custom settings', async () => {
+      await page.goto('/login', NAVIGATION_OPTIONS);
+      await page.locator('button:has-text("Continue with Email")').click();
+      await page.locator('input[placeholder="Email address"]').fill('logged@example.com');
+      await page.locator('input[placeholder="Password"]').fill('loggedpass123');
+      await page.locator('button:has-text("Continue")').click();
 
-    await page.waitForURL('/');
-    await helper.waitForReduxHydration();
+      await page.waitForURL('/');
+      await helper.waitForReduxHydration();
 
-    // Verify user has custom settings
-    let defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.userHasCustomised).toBe(true);
-    expect(defaultSettings.detectedLanguage).toBe('ar');
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.userHasCustomised).toBe(true);
+      expect(defaultSettings.detectedLanguage).toBe('ar');
+    });
 
-    // Open settings and click Reset to defaults
-    await helper.homepage.openSettingsDrawer();
-    await expect(page.locator('[data-testid="settings-drawer"]')).toBeVisible();
+    await test.step('Reset settings and verify', async () => {
+      await helper.homepage.openSettingsDrawer();
+      await expect(page.locator('#theme-section')).toBeVisible();
 
-    await page.locator('text=Reset to defaults').click();
-    await page.waitForTimeout(2000); // Allow reset to complete
+      await page.locator('text=Reset to defaults').click();
+      await page.waitForTimeout(2000); // Allow reset to complete
 
-    // Verify fresh detection and reset
-    defaultSettings = await helper.getReduxState();
-    expect(defaultSettings.userHasCustomised).toBe(false);
-    expect(defaultSettings.isUsingDefaultSettings).toBe(true);
-    expect(defaultSettings.detectedLanguage).toBe('en'); // Should detect fresh
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings.userHasCustomised).toBe(false);
+      expect(defaultSettings.isUsingDefaultSettings).toBe(true);
+      expect(defaultSettings.detectedLanguage).toBe('en'); // Should detect fresh
 
-    // Verify new defaults are applied
-    const translations = await helper.homepage.getPersistedValue('translations');
-    expect(translations.selectedTranslations).toContain(131); // New default
-    expect(translations.isUsingDefaultTranslations).toBe(true);
+      const translations = await helper.homepage.getPersistedValue('translations');
+      expect(translations.selectedTranslations).toContain(131); // New default
+      expect(translations.isUsingDefaultTranslations).toBe(true);
+    });
   });
 });
 
@@ -1133,138 +1231,137 @@ test.describe('Category 5: Reflections Language Integration', () => {
   });
 
   test('Test Case 5.1: Reflections List Language Matching', async ({ page }) => {
-    // Set up user with specific reflection languages in country preferences
-    await helper.setBrowserLanguage(['en-US', 'en']);
-    await helper.mockCountryDetection('US');
+    await test.step('Setup user with reflection languages and mock API', async () => {
+      await helper.setBrowserLanguage(['en-US', 'en']);
+      await helper.mockCountryDetection('US');
 
-    // Mock reflections API to return sample reflection data
-    await page.route('**/api/verses/1:1/reflections*', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          reflections: [
-            { id: 1, text: 'English reflection', language: 'en' },
-            { id: 2, text: 'تأمل عربي', language: 'ar' },
-            { id: 3, text: 'اردو تأمل', language: 'ur' },
-            { id: 4, text: 'French reflection', language: 'fr' }, // Should not appear
-          ],
-        }),
+      await page.route('**/api/verses/1:1/reflections*', async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            reflections: [
+              { id: 1, text: 'English reflection', language: 'en' },
+              { id: 2, text: 'تأمل عربي', language: 'ar' },
+              { id: 3, text: 'اردو تأمل', language: 'ur' },
+              { id: 4, text: 'French reflection', language: 'fr' }, // Should not appear
+            ],
+          }),
+        });
       });
     });
 
-    await page.goto('/');
-    await helper.waitForReduxHydration();
+    await test.step('Navigate to verse with reflections', async () => {
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
 
-    // Navigate to a verse with reflections
-    await page.goto('/1/1'); // Al-Fatiha verse 1
-    await page.waitForLoadState('networkidle');
+      await page.goto('/1/1'); // Al-Fatiha verse 1
+      await page.waitForLoadState('networkidle');
+    });
 
-    // Open ayah-level reflections
-    await page.locator('[data-testid="verse-actions"]').first().click();
-    await page.locator('[data-testid="reflections-button"]').click();
+    await test.step('Open reflections and verify language filter', async () => {
+      await page.locator('[data-testid="verse-actions"]').first().click();
+      await page.locator('[data-testid="reflections-button"]').click();
 
-    // Wait for reflections modal/drawer to be visible
-    await expect(page.locator('[data-testid="reflections-modal"]')).toBeVisible();
+      await expect(page.locator('[data-testid="reflections-modal"]')).toBeVisible();
 
-    // Verify language filter shows only preset languages
-    const languageFilter = page.locator('[data-testid="reflections-language-filter"]');
-    await expect(languageFilter).toBeVisible();
+      const languageFilter = page.locator('[data-testid="reflections-language-filter"]');
+      await expect(languageFilter).toBeVisible();
 
-    // Check that only English, Arabic, and Urdu options are available
-    await languageFilter.click();
-    await expect(page.locator('[data-testid="language-option-en"]')).toBeVisible();
-    await expect(page.locator('[data-testid="language-option-ar"]')).toBeVisible();
-    await expect(page.locator('[data-testid="language-option-ur"]')).toBeVisible();
+      await languageFilter.click();
+      await expect(page.locator('[data-testid="language-option-en"]')).toBeVisible();
+      await expect(page.locator('[data-testid="language-option-ar"]')).toBeVisible();
+      await expect(page.locator('[data-testid="language-option-ur"]')).toBeVisible();
+      await expect(page.locator('[data-testid="language-option-fr"]')).not.toBeVisible();
+    });
 
-    // Verify French is NOT available (not in preset languages)
-    await expect(page.locator('[data-testid="language-option-fr"]')).not.toBeVisible();
+    await test.step('Test filtering by each preset language', async () => {
+      const languageFilter = page.locator('[data-testid="reflections-language-filter"]');
 
-    // Test filtering by each preset language
-    await page.locator('[data-testid="language-option-en"]').click();
-    await expect(page.locator('text=English reflection')).toBeVisible();
-    await expect(page.locator('text=تأمل عربي')).not.toBeVisible();
+      await page.locator('[data-testid="language-option-en"]').click();
+      await expect(page.locator('text=English reflection')).toBeVisible();
+      await expect(page.locator('text=تأمل عربي')).not.toBeVisible();
 
-    await languageFilter.click();
-    await page.locator('[data-testid="language-option-ar"]').click();
-    await expect(page.locator('text=تأمل عربي')).toBeVisible();
-    await expect(page.locator('text=English reflection')).not.toBeVisible();
+      await languageFilter.click();
+      await page.locator('[data-testid="language-option-ar"]').click();
+      await expect(page.locator('text=تأمل عربي')).toBeVisible();
+      await expect(page.locator('text=English reflection')).not.toBeVisible();
 
-    await languageFilter.click();
-    await page.locator('[data-testid="language-option-ur"]').click();
-    await expect(page.locator('text=اردو تأمل')).toBeVisible();
-    await expect(page.locator('text=English reflection')).not.toBeVisible();
+      await languageFilter.click();
+      await page.locator('[data-testid="language-option-ur"]').click();
+      await expect(page.locator('text=اردو تأمل')).toBeVisible();
+      await expect(page.locator('text=English reflection')).not.toBeVisible();
+    });
 
-    // Verify all preset languages show when "All" is selected
-    await languageFilter.click();
-    await page.locator('[data-testid="language-option-all"]').click();
-    await expect(page.locator('text=English reflection')).toBeVisible();
-    await expect(page.locator('text=تأمل عربي')).toBeVisible();
-    await expect(page.locator('text=اردو تأمل')).toBeVisible();
-    // French reflection should still not be visible
-    await expect(page.locator('text=French reflection')).not.toBeVisible();
+    await test.step('Verify "All" languages filter', async () => {
+      const languageFilter = page.locator('[data-testid="reflections-language-filter"]');
+      await languageFilter.click();
+      await page.locator('[data-testid="language-option-all"]').click();
+      await expect(page.locator('text=English reflection')).toBeVisible();
+      await expect(page.locator('text=تأمل عربي')).toBeVisible();
+      await expect(page.locator('text=اردو تأمل')).toBeVisible();
+      await expect(page.locator('text=French reflection')).not.toBeVisible();
+    });
   });
 
   test('Test Case 5.1.2: Reflections Language Updates with Settings Change', async ({ page }) => {
-    // Start with English settings
-    await helper.setBrowserLanguage(['en-US', 'en']);
-    await helper.mockCountryDetection('US');
+    await test.step('Start with English settings', async () => {
+      await helper.setBrowserLanguage(['en-US', 'en']);
+      await helper.mockCountryDetection('US');
 
-    await page.goto('/');
-    await helper.waitForReduxHydration();
-
-    // Manually update reflection languages in settings
-    await helper.homepage.openSettingsDrawer();
-    await expect(page.locator('[data-testid="settings-drawer"]')).toBeVisible();
-
-    // Add Arabic to reflection languages
-    await page.evaluate(() => {
-      window.__store?.dispatch({
-        type: 'defaultSettings/updateAyahReflectionsLanguages',
-        payload: [
-          { isoCode: 'en', name: 'English' },
-          { isoCode: 'ar', name: 'العربية' },
-        ],
-      });
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
     });
 
-    await page.waitForTimeout(1000);
-    await page.keyboard.press('Escape'); // Close settings
+    await test.step('Manually update reflection languages in settings', async () => {
+      await helper.homepage.openSettingsDrawer();
+      await expect(page.locator('#theme-section')).toBeVisible();
 
-    // Navigate to verse page
-    await page.goto('/1/1');
-    await page.waitForLoadState('networkidle');
-
-    // Mock updated reflections API
-    await page.route('**/api/verses/1:1/reflections*', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          reflections: [
-            { id: 1, text: 'English reflection', language: 'en' },
-            { id: 2, text: 'تأمل عربي', language: 'ar' },
-            { id: 3, text: 'French reflection', language: 'fr' },
+      await page.evaluate(() => {
+        window.__store?.dispatch({
+          type: 'defaultSettings/updateAyahReflectionsLanguages',
+          payload: [
+            { isoCode: 'en', name: 'English' },
+            { isoCode: 'ar', name: 'العربية' },
           ],
-        }),
+        });
+      });
+
+      await page.waitForTimeout(1000);
+      await page.keyboard.press('Escape'); // Close settings
+    });
+
+    await test.step('Navigate to verse page and mock reflections API', async () => {
+      await page.goto('/1/1');
+      await page.waitForLoadState('networkidle');
+
+      await page.route('**/api/verses/1:1/reflections*', async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            reflections: [
+              { id: 1, text: 'English reflection', language: 'en' },
+              { id: 2, text: 'تأمل عربي', language: 'ar' },
+              { id: 3, text: 'French reflection', language: 'fr' },
+            ],
+          }),
+        });
       });
     });
 
-    // Open reflections
-    await page.locator('[data-testid="verse-actions"]').first().click();
-    await page.locator('[data-testid="reflections-button"]').click();
-    await expect(page.locator('[data-testid="reflections-modal"]')).toBeVisible();
+    await test.step('Open reflections and verify updated language options', async () => {
+      await page.locator('[data-testid="verse-actions"]').first().click();
+      await page.locator('[data-testid="reflections-button"]').click();
+      await expect(page.locator('[data-testid="reflections-modal"]')).toBeVisible();
 
-    // Verify updated language options
-    const languageFilter = page.locator('[data-testid="reflections-language-filter"]');
-    await languageFilter.click();
+      const languageFilter = page.locator('[data-testid="reflections-language-filter"]');
+      await languageFilter.click();
 
-    // Should show English and Arabic (from updated settings)
-    await expect(page.locator('[data-testid="language-option-en"]')).toBeVisible();
-    await expect(page.locator('[data-testid="language-option-ar"]')).toBeVisible();
-
-    // Should NOT show French (not in user's reflection language settings)
-    await expect(page.locator('[data-testid="language-option-fr"]')).not.toBeVisible();
+      await expect(page.locator('[data-testid="language-option-en"]')).toBeVisible();
+      await expect(page.locator('[data-testid="language-option-ar"]')).toBeVisible();
+      await expect(page.locator('[data-testid="language-option-fr"]')).not.toBeVisible();
+    });
   });
 });
 
@@ -1280,101 +1377,97 @@ test.describe('Category 6: Error Handling & Edge Cases', () => {
   test('Test Case 6.1.1: Network Failure During Detection (Graceful Degradation)', async ({
     page,
   }) => {
-    // Mock network failure for country preference API
-    await page.route('**/resources/country_language_preference*', async (route) => {
-      await route.abort('failed');
+    await test.step('Mock network failure for country preference API', async () => {
+      await page.route('**/resources/country_language_preference*', async (route) => {
+        await route.abort('failed');
+      });
+
+      await helper.setBrowserLanguage(['en-US', 'en']);
+      await helper.mockCountryDetection('US');
     });
 
-    await helper.setBrowserLanguage(['en-US', 'en']);
-    await helper.mockCountryDetection('US');
+    await test.step('Navigate to homepage and verify graceful degradation', async () => {
+      await page.goto('/', NAVIGATION_OPTIONS);
 
-    // Navigate to homepage - should still load despite API failure
-    await page.goto('/');
+      await expect(page.locator('body')).toBeVisible();
+      await helper.waitForReduxHydration();
+      await helper.verifyCoreSettingsAreApplied();
 
-    // Page should load successfully
-    await expect(page.locator('body')).toBeVisible();
-
-    // Should fallback to locale-based defaults
-    await helper.waitForReduxHydration();
-    await helper.verifyCoreSettingsAreApplied();
-
-    // No user-facing errors should be visible
-    await expect(page.locator('text=Error')).not.toBeVisible();
-    await expect(page.locator('text=Failed')).not.toBeVisible();
+      await expect(page.locator('text=Error')).not.toBeVisible();
+      await expect(page.locator('text=Failed')).not.toBeVisible();
+    });
   });
 
   test('Test Case 6.1.2: Invalid Country/Language Combinations', async ({ page }) => {
-    // Mock API returning error for invalid language/country combination
-    await page.route('**/resources/country_language_preference*', async (route) => {
-      await route.fulfill({
-        status: 400,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          error: 'Invalid language/country combination',
-          code: 'INVALID_COMBINATION',
-        }),
+    await test.step('Mock API returning error for invalid combination', async () => {
+      await page.route('**/resources/country_language_preference*', async (route) => {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'Invalid language/country combination',
+            code: 'INVALID_COMBINATION',
+          }),
+        });
       });
+
+      await helper.setBrowserLanguage(['xx-YY', 'xx']); // Invalid language code
+      await helper.mockCountryDetection('YY'); // Invalid country code
     });
 
-    // Set unusual language/country combination
-    await helper.setBrowserLanguage(['xx-YY', 'xx']); // Invalid language code
-    await helper.mockCountryDetection('YY'); // Invalid country code
+    await test.step('Navigate and verify graceful fallback', async () => {
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await expect(page.locator('body')).toBeVisible();
+      await helper.waitForReduxHydration();
 
-    // Navigate to homepage - should still load despite API error
-    await page.goto('/');
+      await helper.verifyCoreSettingsAreApplied();
+      await expect(page.locator('text=Error')).not.toBeVisible();
+      await expect(page.locator('text=Invalid')).not.toBeVisible();
 
-    // Page should load successfully with fallback behavior
-    await expect(page.locator('body')).toBeVisible();
-    await helper.waitForReduxHydration();
-
-    // Should fallback to safe defaults
-    await helper.verifyCoreSettingsAreApplied();
-
-    // No user-facing errors should be visible
-    await expect(page.locator('text=Error')).not.toBeVisible();
-    await expect(page.locator('text=Invalid')).not.toBeVisible();
-
-    // Should likely fallback to English defaults
-    const defaultSettings = await helper.getReduxState();
-    expect(defaultSettings).toBeDefined();
-    expect(defaultSettings.detectedLanguage).toBeTruthy();
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings).toBeDefined();
+      expect(defaultSettings.detectedLanguage).toBeTruthy();
+    });
   });
 
   test('Test Case 6.2.1: Missing Accept-Language Header', async ({ page }) => {
-    // Don't set Accept-Language header
-    await helper.mockCountryDetection('US');
+    await test.step('Setup: mock country detection without language header', async () => {
+      await helper.mockCountryDetection('US');
+    });
 
-    await page.goto('/');
-    await helper.waitForReduxHydration();
+    await test.step('Navigate and verify fallback to English', async () => {
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
 
-    // Should fallback to English
-    await helper.verifyDefaultSettingsStructure({
-      detectedLanguage: 'en',
-      detectedCountry: 'US',
-      userHasCustomised: false,
-      isUsingDefaultSettings: true,
+      await helper.verifyDefaultSettingsStructure({
+        detectedLanguage: 'en',
+        detectedCountry: 'US',
+        userHasCustomised: false,
+        isUsingDefaultSettings: true,
+      });
     });
   });
 
   test('Test Case 6.2.2: Malformed Language Headers', async ({ page }) => {
-    // Set malformed Accept-Language headers
-    const ACCEPT_LANGUAGE = 'Accept-Language';
-    await page.setExtraHTTPHeaders({
-      [ACCEPT_LANGUAGE]: 'invalid-format, malformed;q=notanumber',
+    await test.step('Set malformed Accept-Language headers', async () => {
+      const ACCEPT_LANGUAGE = 'Accept-Language';
+      await page.setExtraHTTPHeaders({
+        [ACCEPT_LANGUAGE]: 'invalid-format, malformed;q=notanumber',
+      });
+
+      await helper.mockCountryDetection('US');
     });
 
-    await helper.mockCountryDetection('US');
+    await test.step('Navigate and verify graceful fallback', async () => {
+      await page.goto('/', NAVIGATION_OPTIONS);
 
-    await page.goto('/');
+      await expect(page.locator('body')).toBeVisible();
+      await helper.waitForReduxHydration();
 
-    // Should not crash and should fallback gracefully
-    await expect(page.locator('body')).toBeVisible();
-    await helper.waitForReduxHydration();
-
-    // Should use fallback defaults
-    const defaultSettings = await helper.getReduxState();
-    expect(defaultSettings).toBeDefined();
-    expect(defaultSettings.detectedLanguage).toBe('en');
+      const defaultSettings = await helper.getReduxState();
+      expect(defaultSettings).toBeDefined();
+      expect(defaultSettings.detectedLanguage).toBe('en');
+    });
   });
 });
 
@@ -1388,47 +1481,44 @@ test.describe('Category 7: Session Persistence', () => {
   });
 
   test('Test Case 7.2: Session Persistence Across Browser Restarts', async ({ page, context }) => {
-    await helper.setBrowserLanguage(['en-US', 'en']);
-    await helper.mockCountryDetection('US');
+    await test.step('Set initial settings and customize', async () => {
+      await helper.setBrowserLanguage(['en-US', 'en']);
+      await helper.mockCountryDetection('US');
 
-    // Set initial settings
-    await page.goto('/');
-    await helper.waitForReduxHydration();
+      await page.goto('/', NAVIGATION_OPTIONS);
+      await helper.waitForReduxHydration();
 
-    // Customize settings
-    await helper.homepage.openSettingsDrawer();
-    await page.evaluate(() => {
-      window.__store?.dispatch({
-        type: 'translations/setSelectedTranslations',
-        payload: { translations: [20], locale: 'en' },
+      await helper.homepage.openSettingsDrawer();
+      await page.evaluate(() => {
+        window.__store?.dispatch({
+          type: 'translations/setSelectedTranslations',
+          payload: { translations: [20], locale: 'en' },
+        });
       });
+
+      await page.waitForTimeout(1000);
+
+      const settingsBeforeRestart = await helper.homepage.getPersistedValue('translations');
+      expect(settingsBeforeRestart.selectedTranslations).toContain(20);
     });
 
-    await page.waitForTimeout(1000);
+    await test.step('Simulate browser restart and verify persistence', async () => {
+      const newPage = await context.newPage();
+      const newHelper = new LocalizationTestHelper(newPage, context);
 
-    // Get settings before "restart"
-    const settingsBeforeRestart = await helper.homepage.getPersistedValue('translations');
-    expect(settingsBeforeRestart.selectedTranslations).toContain(20);
+      await newHelper.setBrowserLanguage(['en-US', 'en']);
+      await newHelper.mockCountryDetection('US');
 
-    // Simulate browser restart by creating new page with same context
-    const newPage = await context.newPage();
-    const newHelper = new LocalizationTestHelper(newPage, context);
+      await newPage.goto('/');
+      await newHelper.waitForReduxHydration();
 
-    // Mock the same APIs for the new session
-    await newHelper.setBrowserLanguage(['en-US', 'en']);
-    await newHelper.mockCountryDetection('US');
+      const settingsAfterRestart = await newHelper.homepage.getPersistedValue('translations');
+      expect(settingsAfterRestart.selectedTranslations).toContain(20);
 
-    await newPage.goto('/');
-    await newHelper.waitForReduxHydration();
+      const defaultSettings = await newHelper.getReduxState();
+      expect(defaultSettings.userHasCustomised).toBe(true);
 
-    // Verify settings persisted across "restart"
-    const settingsAfterRestart = await newHelper.homepage.getPersistedValue('translations');
-    expect(settingsAfterRestart.selectedTranslations).toContain(20);
-
-    // Verify Redux rehydrated correctly
-    const defaultSettings = await newHelper.getReduxState();
-    expect(defaultSettings.userHasCustomised).toBe(true);
-
-    await newPage.close();
+      await newPage.close();
+    });
   });
 });

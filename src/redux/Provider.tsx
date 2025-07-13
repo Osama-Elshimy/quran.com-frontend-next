@@ -1,4 +1,4 @@
-import React, { useContext, useMemo } from 'react';
+import React, { useContext, useMemo, useEffect } from 'react';
 
 import setLanguage from 'next-translate/setLanguage';
 import { Provider } from 'react-redux';
@@ -43,6 +43,14 @@ const ReduxProvider = ({
   );
   const persistor = useMemo(() => persistStore(store), [store]);
   const audioService = useContext(AudioPlayerMachineContext);
+
+  // Expose store to window for testing purposes
+  useEffect(() => {
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      // eslint-disable-next-line no-underscore-dangle
+      (window as any).__store = store;
+    }
+  }, [store]);
 
   /**
    * Helper to set the audio player context with consistent parameters

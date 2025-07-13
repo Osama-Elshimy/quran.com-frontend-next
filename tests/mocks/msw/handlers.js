@@ -53,6 +53,54 @@ function getCountryLanguagePreferenceMockData(userDeviceLanguage, country) {
   };
 }
 
+const MOCK_LOGIN_USER = {
+  success: true,
+  user: {
+    id: 'ebd161f7-9301-4f78-baae-1100fba00e07',
+    email: 'osama+500@quran.com',
+    firstName: 'Eleanor',
+    lastName: 'Gilliam',
+    photoUrl: null,
+    lastSyncAt: '2025-07-12T15:25:57.456Z',
+    lastActiveAt: '2025-07-12T17:05:22.860Z',
+    lastMutationAt: '2025-07-12T16:42:11.675Z',
+    timezone: 'Africa/Cairo',
+    registrationSource: 'Quran.com_web',
+    username: 'lomev',
+    isAdmin: false,
+    isBanned: false,
+    createdAt: '2025-07-12T08:03:11.494Z',
+    features: null,
+    consents: {},
+  },
+};
+
+const AT_STAGING_COOKIE =
+  'at_staging=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJlYmQxNjFmNy05MzAxLTRmNzgtYmFhZS0xMTAwZmJhMDBlMDciLCJhcyI6IkVNTCIsImlzQWRtaW4iOmZhbHNlLCJpYXQiOjE3NTIzNDkzMTMsImV4cCI6MTc1MjM1MTExM30.MlDmz4CMqyDdkMDWbjCUhg2RLAfAdAQThgLGTXqf0qM; path=/; expires=Sat, 12 Jul 2025 20:12:23 GMT; samesite=lax; httponly';
+const RT_STAGING_COOKIE =
+  'rt_staging=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJlYmQxNjFmNy05MzAxLTRmNzgtYmFhZS0xMTAwZmJhMDBlMDciLCJhcyI6IkVNTCIsImlzQWRtaW4iOmZhbHNlLCJqdGkiOiJhODVkNGVkZi01ZGRiLTQ4N2ItYWI2MS1hY2Y1ODg5YjMwZjQiLCJpYXQiOjE3NTIzNDkzMTMsImV4cCI6MTc1NDk0MTMxM30.rCbOXjW7tjX_jZeb3GNhn5cQnm5vTVzswXqh4uUpoPw; path=/; expires=Mon, 11 Aug 2025 19:41:53 GMT; samesite=lax; httponly';
+const ID_STAGING_COOKIE =
+  'id_staging=ebd161f7-9301-4f78-baae-1100fba00e07; path=/; expires=Mon, 11 Aug 2025 19:41:53 GMT; samesite=lax';
+const NOTIF_SUB_ID_STAGING_COOKIE =
+  'notif_sub_id_staging=5910f6d161eb60f8828d54175c1cbb3863fcb7f422350c897fe599bb91878ad5; path=/; expires=Mon, 11 Aug 2025 19:41:53 GMT; samesite=lax';
+
+// Helper function to create the login response
+function createLoginResponse() {
+  const response = new HttpResponse(JSON.stringify(MOCK_LOGIN_USER), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  response.headers.append('Set-Cookie', AT_STAGING_COOKIE);
+  response.headers.append('Set-Cookie', RT_STAGING_COOKIE);
+  response.headers.append('Set-Cookie', ID_STAGING_COOKIE);
+  response.headers.append('Set-Cookie', NOTIF_SUB_ID_STAGING_COOKIE);
+
+  return response;
+}
+
 // Define handlers for MSW
 const handlers = [
   // Handler for country language preference API - flexible pattern matching
@@ -69,22 +117,29 @@ const handlers = [
   }),
 
   // Handler for auth endpoints
-  http.post('*/auth/signup', () => {
+  http.post('*/auth/users/signup', async ({ request }) => {
+    const requestBody = await request.json();
+    if (requestBody.verificationCode) {
+      // User has submitted verification code, so we log them in
+      return createLoginResponse();
+    }
+    // Initial signup request before verification
     return HttpResponse.json({
       success: true,
-      user: { id: 'test-user-123', email: 'test@example.com' },
+      message: 'Verification code sent',
     });
   }),
 
-  http.post('*/auth/login', () => {
-    return HttpResponse.json({
-      success: true,
-      user: {
-        id: 'existing-user-123',
-        email: 'existing@example.com',
-        settings: null, // or provide mock settings
-      },
-    });
+  http.post('*/auth/users/login', () => createLoginResponse()),
+
+  http.get('*/api/proxy/auth/preferences', () => {
+    return HttpResponse.json({ language: { language: 'en' } });
+  }),
+
+  http.post('*/api/proxy/auth/preferences', async ({ request }) => {
+    const requestBody = await request.json();
+    console.log('MSW: Intercepted preference update request with body:', requestBody);
+    return HttpResponse.json({ success: true });
   }),
 
   // Handler for reflections API
@@ -100,11 +155,6 @@ const handlers = [
         { id: 4, text: 'French reflection', language: 'fr' },
       ],
     });
-  }),
-
-  // Handler for user settings update
-  http.put('*/user/settings', () => {
-    return HttpResponse.json({ success: true });
   }),
 ];
 
