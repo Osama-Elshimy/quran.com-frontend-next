@@ -1805,7 +1805,7 @@ test.describe('Category 5: Reflections Language Integration', () => {
       await page.goto('/', NAVIGATION_OPTIONS);
       await testHelper.waitForReduxHydration();
 
-      await page.goto('/1/1'); // Al-Fatiha verse 1
+      await page.goto('/1:1/reflections'); // Al-Fatiha verse 1
       await page.waitForLoadState('networkidle');
     });
 
@@ -1887,7 +1887,7 @@ test.describe('Category 5: Reflections Language Integration', () => {
     });
 
     await test.step('Navigate to verse page and mock reflections API', async () => {
-      await page.goto('/1/1');
+      await page.goto('/1:1/reflections');
       await page.waitForLoadState('networkidle');
 
       // Mock reflections API response
