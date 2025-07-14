@@ -47,7 +47,9 @@ const ResetButton = () => {
   return (
     <>
       <div className={styles.resetButtonContainer}>
-        <Button onClick={onResetSettingsClicked}>{t('settings.reset-cta')}</Button>
+        <Button onClick={onResetSettingsClicked} data-testid="reset-settings-button">
+          {t('settings.reset-cta')}
+        </Button>
       </div>
     </>
   );

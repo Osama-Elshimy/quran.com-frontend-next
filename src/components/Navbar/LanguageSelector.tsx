@@ -135,6 +135,7 @@ const LanguageSelector = ({
               </span>
             }
             tooltip={t('languages')}
+            data-testid="language-selector-button-footer"
             variant={ButtonVariant.Ghost}
             suffix={
               <span className={styles.triggerSuffixContainer}>
@@ -149,6 +150,7 @@ const LanguageSelector = ({
             tooltip={t('languages')}
             shape={ButtonShape.Circle}
             variant={ButtonVariant.Ghost}
+            data-testid="language-selector-button-navbar"
             ariaLabel={t('aria.select-lng')}
           >
             <span className={styles.globeIconWrapper}>
@@ -166,6 +168,7 @@ const LanguageSelector = ({
           isSelected={option.value === lang}
           shouldCloseMenuAfterClick
           key={option.value}
+          dataTestId={`language-selector-item-${option.value}`}
           onClick={() => onChange(option.value)}
         >
           {option.label}

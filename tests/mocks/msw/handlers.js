@@ -7,14 +7,57 @@ const { http, HttpResponse } = require('msw');
 
 const { mockCountryLanguagePreferences } = require('../data');
 
-// Define the base URL for the API
-const API_GATEWAY_URL = process.env.API_GATEWAY_URL || 'http://localhost:8787';
-const API_BASE_URL = `${API_GATEWAY_URL}/content/api/qdc`;
+// Test-specific data storage for per-test customization
+const testDataStore = {
+  preferences: null,
+  errorScenarios: {},
+  reflections: null,
+  loginResponse: null,
+  countryLanguagePreference: null,
+};
 
-console.log('MSW: API_GATEWAY_URL:', API_GATEWAY_URL);
-console.log('MSW: API_BASE_URL:', API_BASE_URL);
+// Helper function to set test-specific data
+function setTestData(type, data) {
+  testDataStore[type] = data;
+}
+
+// Helper function to get test-specific data
+function getTestData(type) {
+  return testDataStore[type];
+}
+
+// Helper function to clear test data
+function clearTestData() {
+  testDataStore.preferences = null;
+  testDataStore.errorScenarios = {};
+  testDataStore.reflections = null;
+  testDataStore.loginResponse = null;
+  testDataStore.countryLanguagePreference = null;
+}
 
 // Mock data for different language/country combinations
+
+// Helper function to handle error scenarios for country language preference
+function handleCountryLanguagePreferenceErrors(errorScenarios) {
+  if (errorScenarios && errorScenarios.countryLanguagePreference) {
+    const errorConfig = errorScenarios.countryLanguagePreference;
+    if (errorConfig.type === 'network_failure') {
+      console.log('MSW: Simulating network failure');
+      return new Response(null, { status: 500 });
+    }
+    if (errorConfig.type === 'invalid_combination') {
+      console.log('MSW: Simulating invalid combination error');
+      return HttpResponse.json(
+        {
+          error: 'Invalid language/country combination',
+          code: 'INVALID_COMBINATION',
+        },
+        { status: 400 },
+      );
+    }
+  }
+  return null;
+}
 
 // Helper function to get country language preference mock data
 function getCountryLanguagePreferenceMockData(userDeviceLanguage, country) {
@@ -75,14 +118,14 @@ const MOCK_LOGIN_USER = {
   },
 };
 
-const AT_STAGING_COOKIE =
-  'at_staging=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJlYmQxNjFmNy05MzAxLTRmNzgtYmFhZS0xMTAwZmJhMDBlMDciLCJhcyI6IkVNTCIsImlzQWRtaW4iOmZhbHNlLCJpYXQiOjE3NTIzNDkzMTMsImV4cCI6MTc1MjM1MTExM30.MlDmz4CMqyDdkMDWbjCUhg2RLAfAdAQThgLGTXqf0qM; path=/; expires=Sat, 12 Jul 2025 20:12:23 GMT; samesite=lax; httponly';
-const RT_STAGING_COOKIE =
-  'rt_staging=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJlYmQxNjFmNy05MzAxLTRmNzgtYmFhZS0xMTAwZmJhMDBlMDciLCJhcyI6IkVNTCIsImlzQWRtaW4iOmZhbHNlLCJqdGkiOiJhODVkNGVkZi01ZGRiLTQ4N2ItYWI2MS1hY2Y1ODg5YjMwZjQiLCJpYXQiOjE3NTIzNDkzMTMsImV4cCI6MTc1NDk0MTMxM30.rCbOXjW7tjX_jZeb3GNhn5cQnm5vTVzswXqh4uUpoPw; path=/; expires=Mon, 11 Aug 2025 19:41:53 GMT; samesite=lax; httponly';
-const ID_STAGING_COOKIE =
-  'id_staging=ebd161f7-9301-4f78-baae-1100fba00e07; path=/; expires=Mon, 11 Aug 2025 19:41:53 GMT; samesite=lax';
-const NOTIF_SUB_ID_STAGING_COOKIE =
-  'notif_sub_id_staging=5910f6d161eb60f8828d54175c1cbb3863fcb7f422350c897fe599bb91878ad5; path=/; expires=Mon, 11 Aug 2025 19:41:53 GMT; samesite=lax';
+const AT_COOKIE =
+  'at_test=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJlYmQxNjFmNy05MzAxLTRmNzgtYmFhZS0xMTAwZmJhMDBlMDciLCJhcyI6IkVNTCIsImlzQWRtaW4iOmZhbHNlLCJpYXQiOjE3NTIzNDkzMTMsImV4cCI6MTc1MjM1MTExM30.MlDmz4CMqyDdkMDWbjCUhg2RLAfAdAQThgLGTXqf0qM; path=/; expires=Sat, 12 Jul 2025 20:12:23 GMT; samesite=lax; httponly';
+const RT_COOKIE =
+  'rt_test=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJlYmQxNjFmNy05MzAxLTRmNzgtYmFhZS0xMTAwZmJhMDBlMDciLCJhcyI6IkVNTCIsImlzQWRtaW4iOmZhbHNlLCJqdGkiOiJhODVkNGVkZi01ZGRiLTQ4N2ItYWI2MS1hY2Y1ODg5YjMwZjQiLCJpYXQiOjE3NTIzNDkzMTMsImV4cCI6MTc1NDk0MTMxM30.rCbOXjW7tjX_jZeb3GNhn5cQnm5vTVzswXqh4uUpoPw; path=/; expires=Mon, 11 Aug 2025 19:41:53 GMT; samesite=lax; httponly';
+const ID_COOKIE =
+  'id_test=ebd161f7-9301-4f78-baae-1100fba00e07; path=/; expires=Mon, 11 Aug 2025 19:41:53 GMT; samesite=lax';
+const NOTIF_SUB_ID_COOKIE =
+  'notif_sub_id=5910f6d161eb60f8828d54175c1cbb3863fcb7f422350c897fe599bb91878ad5; path=/; expires=Mon, 11 Aug 2025 19:41:53 GMT; samesite=lax';
 
 // Helper function to create the login response
 function createLoginResponse() {
@@ -93,10 +136,27 @@ function createLoginResponse() {
     },
   });
 
-  response.headers.append('Set-Cookie', AT_STAGING_COOKIE);
-  response.headers.append('Set-Cookie', RT_STAGING_COOKIE);
-  response.headers.append('Set-Cookie', ID_STAGING_COOKIE);
-  response.headers.append('Set-Cookie', NOTIF_SUB_ID_STAGING_COOKIE);
+  response.headers.append('Set-Cookie', AT_COOKIE);
+  response.headers.append('Set-Cookie', RT_COOKIE);
+  response.headers.append('Set-Cookie', ID_COOKIE);
+  response.headers.append('Set-Cookie', NOTIF_SUB_ID_COOKIE);
+
+  return response;
+}
+
+// Helper function to create custom login response with test data
+function createCustomLoginResponse(customData) {
+  const response = new HttpResponse(JSON.stringify(customData), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  response.headers.append('Set-Cookie', AT_COOKIE);
+  response.headers.append('Set-Cookie', RT_COOKIE);
+  response.headers.append('Set-Cookie', ID_COOKIE);
+  response.headers.append('Set-Cookie', NOTIF_SUB_ID_COOKIE);
 
   return response;
 }
@@ -111,8 +171,24 @@ const handlers = [
 
     console.log('MSW: Intercepted request URL:', request.url);
     console.log('MSW: Intercepted request for:', { userDeviceLanguage, country });
+
+    // Check for error scenarios
+    const errorScenarios = getTestData('errorScenarios');
+    const errorResponse = handleCountryLanguagePreferenceErrors(errorScenarios);
+    if (errorResponse) {
+      return errorResponse;
+    }
+
+    // Check for test-specific data first
+    const customData = getTestData('countryLanguagePreference');
+    if (customData) {
+      console.log('MSW: Returning test-specific data:', customData);
+      return HttpResponse.json(customData);
+    }
+
+    // Fall back to default mock data
     const mockData = getCountryLanguagePreferenceMockData(userDeviceLanguage, country);
-    console.log('MSW: Returning data:', mockData);
+    console.log('MSW: Returning default data:', mockData);
     return HttpResponse.json(mockData);
   }),
 
@@ -130,15 +206,62 @@ const handlers = [
     });
   }),
 
-  http.post('*/auth/users/login', () => createLoginResponse()),
-
-  http.get('*/api/proxy/auth/preferences', () => {
-    return HttpResponse.json({ language: { language: 'en' } });
+  http.post('*/auth/users/login', () => {
+    const customLoginResponse = getTestData('loginResponse');
+    if (customLoginResponse) {
+      console.log('MSW: Returning custom login response:', customLoginResponse);
+      return createCustomLoginResponse(customLoginResponse);
+    }
+    return createLoginResponse();
   }),
 
+  // Handler for getting user preferences (UserPreferencesResponse format)
+  http.get('*/auth/preferences', () => {
+    const customPreferences = getTestData('preferences');
+    if (customPreferences) {
+      console.log('MSW: Returning custom preferences:', customPreferences);
+      return HttpResponse.json(customPreferences);
+    }
+
+    // Default preferences structure matching UserPreferencesResponse
+    const defaultPreferences = {
+      language: { language: 'en' },
+      theme: { type: 'auto' },
+      audio: {
+        reciter: { id: 7, name: 'Mishari Rashid al-`Afasy' },
+        playbackRate: 1,
+        showTooltipWhenPlayingAudio: true,
+        enableAutoScrolling: true,
+      },
+      translations: { selectedTranslations: [131] },
+      tafsirs: { selectedTafsirs: ['en-tafisr-ibn-kathir'] },
+      reading: { selectedWordByWordLocale: 'en' },
+      quranReaderStyles: {
+        quranFont: 'code_v1',
+        mushafLines: 'code_v1',
+        quranTextFontSize: 3,
+        translationFontSize: 3,
+      },
+    };
+
+    console.log('MSW: Returning default preferences:', defaultPreferences);
+    return HttpResponse.json(defaultPreferences);
+  }),
+
+  // Handler for updating user preferences
   http.post('*/api/proxy/auth/preferences', async ({ request }) => {
     const requestBody = await request.json();
     console.log('MSW: Intercepted preference update request with body:', requestBody);
+
+    // Check for error scenarios
+    const errorScenarios = getTestData('errorScenarios');
+    if (errorScenarios && errorScenarios.preferences) {
+      return HttpResponse.json(
+        { error: { message: 'Preference update failed' }, success: false },
+        { status: 400 },
+      );
+    }
+
     return HttpResponse.json({ success: true });
   }),
 
@@ -147,6 +270,13 @@ const handlers = [
     const { verseKey } = params;
     console.log('MSW: Intercepted reflections request for verse:', verseKey);
 
+    const customReflections = getTestData('reflections');
+    if (customReflections) {
+      console.log('MSW: Returning custom reflections:', customReflections);
+      return HttpResponse.json(customReflections);
+    }
+
+    // Default reflections
     return HttpResponse.json({
       reflections: [
         { id: 1, text: 'English reflection', language: 'en' },
@@ -161,4 +291,7 @@ const handlers = [
 module.exports = {
   handlers,
   mockCountryLanguagePreferences,
+  setTestData,
+  getTestData,
+  clearTestData,
 };

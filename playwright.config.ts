@@ -44,6 +44,7 @@ const config: PlaywrightTestConfig = {
       NODE_ENV: 'development',
       PORT: '3005',
       MSW_ENABLED: 'true', // Enable MSW for tests
+      NEXT_PUBLIC_APP_ENV: 'test', // Set environment to staging to match cookie names
     },
   },
 

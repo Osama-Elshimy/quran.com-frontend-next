@@ -1,9 +1,11 @@
+/* eslint-disable max-lines */
 /* eslint-disable react-func/max-lines-per-function */
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 
 import { getLocaleInitialState } from '../defaultSettings/util';
 
 import { getCountryLanguagePreference } from '@/api';
+import resetSettings from '@/redux/actions/reset-settings';
 import { RootState } from '@/redux/RootState';
 import { setSelectedWordByWordLocale } from '@/redux/slices/QuranReader/readingPreferences';
 import { setQuranFont, setMushafLines } from '@/redux/slices/QuranReader/styles';
@@ -186,6 +188,10 @@ export const resetDefaultSettings = createAsyncThunk<void, string, { state: Root
 
     // Reset the userHasCustomised flag to false
     dispatch(setUserHasCustomised(false));
+
+    // Dispatch the reset settings event to trigger the middleware
+    // This will set isUsingDefaultSettings to true
+    dispatch(resetSettings(detectedLanguage));
   },
 );
 

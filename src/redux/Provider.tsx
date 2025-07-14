@@ -88,7 +88,7 @@ const ReduxProvider = ({
       try {
         const userPreferences = await getUserPreferences();
         // if the user has no preferences, apply guest defaults
-        if (Object.keys(userPreferences).length === 0) {
+        if (Object?.keys(userPreferences)?.length === 0) {
           applyGuestDefaults();
           return;
         }
